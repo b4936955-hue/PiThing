@@ -1,0 +1,1 @@
+{"digitCount":100000001,"chunkSize":9000000,"chunkCount":12,"format":"packed9","note":"pi digits: '3' then the decimals, no dot. 9 digits per big-endian uint32."}

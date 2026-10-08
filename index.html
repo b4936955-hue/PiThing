@@ -1,0 +1,1191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>The Library of Pi</title>
+
+<style>
+
+* { box-sizing: border-box; }
+
+html, body {
+    margin: 0;
+    min-height: 100%;
+    background: #09090b;
+    color: #eee;
+    font-family: Arial, Helvetica, sans-serif;
+}
+
+button, input, select { font: inherit; color: inherit; }
+button { cursor: pointer; }
+::placeholder { color: #55555c; }
+
+.app { width: min(900px, 100%); margin: auto; padding: 20px 18px 80px; }
+
+header {
+    height: 45px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 26px;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+.logo { color: white; text-decoration: none; font-size: 16px; font-weight: 700; letter-spacing: -.04em; }
+
+nav { display: flex; gap: 4px; flex-wrap: wrap; }
+nav button {
+    border: 0;
+    background: transparent;
+    color: #77777d;
+    padding: 7px 10px;
+    border-radius: 6px;
+    font-size: 12px;
+}
+nav button:hover, nav button.active { background: #151518; color: white; }
+
+.view { display: none; }
+.view.visible { display: block; }
+
+.card { background: #101012; border: 1px solid #1c1c20; border-radius: 12px; padding: 20px; margin-bottom: 16px; }
+
+h2.section-title { font-size: 15px; margin: 0 0 4px; }
+p.section-sub { font-size: 12px; color: #77777d; margin: 0 0 14px; line-height: 1.6; }
+
+.row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 10px; }
+
+input[type="text"], input[type="number"] {
+    background: #111114;
+    border: 1px solid #232328;
+    border-radius: 8px;
+    padding: 9px 11px;
+    color: #eee;
+    font-size: 13px;
+}
+
+input[type="number"] { width: 90px; }
+input[type="text"] { flex: 1; min-width: 160px; }
+
+.btn {
+    background: #eee;
+    color: #09090b;
+    border: 0;
+    border-radius: 8px;
+    padding: 9px 15px;
+    font-size: 12px;
+    font-weight: 700;
+}
+.btn:hover { background: #fff; }
+.btn:disabled { opacity: .5; cursor: default; }
+
+.ghost {
+    background: transparent;
+    border: 1px solid #232328;
+    color: #b5b5bc;
+    border-radius: 8px;
+    padding: 9px 13px;
+    font-size: 12px;
+}
+.ghost:hover { border-color: #3a3a42; color: #fff; }
+
+.chip {
+    background: #16161a;
+    border: 1px solid #26262c;
+    color: #b5b5bc;
+    border-radius: 999px;
+    padding: 5px 11px;
+    font-size: 11px;
+}
+.chip:hover { border-color: #3a3a42; color: #fff; }
+
+.mono {
+    font-family: "Courier New", monospace;
+    font-size: 14px;
+    line-height: 1.9;
+    word-break: break-all;
+    background: #0d0d10;
+    border: 1px solid #1c1c20;
+    border-radius: 8px;
+    padding: 14px;
+    min-height: 60px;
+}
+.mono mark {
+    background: #ffcf3a;
+    color: #09090b;
+    border-radius: 3px;
+    padding: 0 1px;
+}
+
+.progress-wrap { display: none; align-items: center; gap: 10px; margin-top: 10px; }
+.progress-wrap.visible { display: flex; }
+.progress-bar {
+    flex: 1;
+    height: 6px;
+    background: #1c1c20;
+    border-radius: 999px;
+    overflow: hidden;
+}
+.progress-fill { height: 100%; width: 0%; background: #eee; transition: width .15s ease; }
+.progress-label { font-size: 11px; color: #77777d; white-space: nowrap; }
+
+.result-line { font-size: 12px; color: #8a8a92; margin-top: 10px; min-height: 16px; }
+.result-line.ok { color: #8affc9; }
+.result-line.err { color: #ff8080; }
+.result-line code { color: #eee; background: #1a1a1f; padding: 2px 6px; border-radius: 4px; }
+
+.label { font-size: 11px; color: #77777d; text-transform: uppercase; letter-spacing: .04em; margin-right: 4px; }
+
+img.pi-image {
+    display: block;
+    image-rendering: pixelated;
+    border: 1px solid #1c1c20;
+    border-radius: 8px;
+    background: #0d0d10;
+    max-width: 100%;
+}
+
+.image-preview { display: flex; gap: 20px; flex-wrap: wrap; align-items: flex-start; margin-top: 14px; }
+.image-preview .col { text-align: center; }
+.image-preview .col p { font-size: 11px; color: #77777d; margin: 8px 0 0; }
+
+.dropzone {
+    border: 1px dashed #26262c;
+    border-radius: 10px;
+    padding: 24px;
+    text-align: center;
+    font-size: 12px;
+    color: #77777d;
+    cursor: pointer;
+}
+.dropzone:hover { border-color: #3a3a42; color: #b5b5bc; }
+.dropzone.drag { border-color: #eee; color: #eee; }
+
+.status-banner {
+    background: #1a1408;
+    border: 1px solid #4a3a10;
+    color: #ffcf8a;
+    border-radius: 10px;
+    padding: 14px 16px;
+    font-size: 12px;
+    line-height: 1.6;
+    margin-bottom: 20px;
+}
+.status-banner code { background: #0d0d10; padding: 2px 6px; border-radius: 4px; }
+
+.palette-grid { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.swatch { display: flex; align-items: center; gap: 6px; font-size: 11px; color: #b5b5bc; }
+.swatch .dot { width: 14px; height: 14px; border-radius: 4px; border: 1px solid #26262c; }
+
+.about-body { font-size: 13px; color: #c5c5cc; line-height: 1.75; }
+.about-body h4 { font-size: 12px; color: #8a8a92; text-transform: uppercase; letter-spacing: .04em; margin: 20px 0 6px; }
+
+.chip-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.history-row { display: flex; justify-content: space-between; align-items: center; padding: 6px 0; font-size: 12px; color: #b5b5bc; border-bottom: 1px solid #17171a; }
+.history-row:last-child { border-bottom: 0; }
+.history-row button { background: none; border: 0; color: #6a6a72; font-size: 11px; }
+.history-row button:hover { color: #ff8080; }
+
+</style>
+</head>
+<body>
+
+<div class="app">
+
+<header>
+    <a href="#digits" class="logo">The Library of Pi</a>
+    <nav>
+        <button data-nav="digits" class="active">Digits</button>
+        <button data-nav="letters">Letters</button>
+        <button data-nav="image">Image</button>
+        <button data-nav="about">About</button>
+    </nav>
+</header>
+
+<div class="status-banner" id="notReadyBanner" style="display:none;">
+    No pi digit file is set up yet. Run <code>npm run download-pi</code> then
+    <code>npm run build-index</code> (real digit file), or
+    <code>npm run gen-test-digits</code> for a small local test set — then restart the server.
+</div>
+
+<!-- DIGITS -->
+<section class="view visible" id="digits">
+    <div class="card">
+        <h2 class="section-title">Search for digits</h2>
+        <p class="section-sub" id="digitProbabilityHint">Find where a number appears in pi. Digits only.</p>
+        <div class="row">
+            <input type="text" id="digitSearchInput" placeholder="e.g. 1234" maxlength="200">
+            <button class="btn" id="digitSearchBtn">Search</button>
+            <button class="ghost" id="digitCancelBtn" style="display:none;">Cancel</button>
+        </div>
+        <div class="progress-wrap" id="digitProgressWrap">
+            <div class="progress-bar"><div class="progress-fill" id="digitProgressFill"></div></div>
+            <span class="progress-label" id="digitProgressLabel">0%</span>
+        </div>
+        <div class="result-line" id="digitSearchResult"></div>
+        <div class="mono" id="digitMatchContext" style="display:none;"></div>
+
+        <div class="chip-row" id="digitLandmarks"></div>
+        <div class="chip-row" id="digitHistory"></div>
+    </div>
+
+    <div class="card">
+        <h2 class="section-title">Find a date</h2>
+        <p class="section-sub">Search for a birthday or any date, in a few common digit orders.</p>
+        <div class="row">
+            <input type="number" id="dateMonth" placeholder="MM" min="1" max="12" style="width:60px;">
+            <input type="number" id="dateDay" placeholder="DD" min="1" max="31" style="width:60px;">
+            <input type="number" id="dateYear" placeholder="YYYY" min="1" max="9999" style="width:80px;">
+        </div>
+        <div class="chip-row" id="dateFormatButtons"></div>
+    </div>
+
+    <div class="card">
+        <h2 class="section-title">Browse digits</h2>
+        <p class="section-sub">Jump to any position in pi and read forward from there.</p>
+        <div class="row">
+            <span class="label">Offset</span>
+            <input type="number" id="digitOffset" value="0" min="0">
+            <span class="label">Length</span>
+            <input type="number" id="digitLength" value="120" min="1" max="2000">
+            <button class="btn" id="digitBrowseBtn">Go</button>
+            <button class="ghost" id="digitRandomBtn">Random</button>
+            <button class="ghost" id="digitCopyBtn">Copy</button>
+        </div>
+        <div class="mono" id="digitDisplay"></div>
+    </div>
+</section>
+
+<!-- LETTERS -->
+<section class="view" id="letters">
+    <div class="card">
+        <h2 class="section-title">Search for a word</h2>
+        <p class="section-sub">
+            Pi decoded as letters — every pair of digits (00-99), mod 26, becomes one
+            letter A-Z. Search for a word in that decoded stream.
+        </p>
+        <div class="row">
+            <input type="text" id="letterSearchInput" placeholder="e.g. AND" maxlength="100">
+            <button class="btn" id="letterSearchBtn">Search</button>
+            <button class="ghost" id="letterCancelBtn" style="display:none;">Cancel</button>
+        </div>
+        <div class="progress-wrap" id="letterProgressWrap">
+            <div class="progress-bar"><div class="progress-fill" id="letterProgressFill"></div></div>
+            <span class="progress-label" id="letterProgressLabel">0%</span>
+        </div>
+        <div class="result-line" id="letterSearchResult"></div>
+        <div class="mono" id="letterMatchContext" style="display:none;"></div>
+        <div class="chip-row" id="letterHistory"></div>
+    </div>
+
+    <div class="card">
+        <h2 class="section-title">Browse letters</h2>
+        <p class="section-sub">Letter offset (not digit offset) — letter 0 is digits 0-1, letter 1 is digits 2-3, and so on.</p>
+        <div class="row">
+            <span class="label">Offset</span>
+            <input type="number" id="letterOffset" value="0" min="0">
+            <span class="label">Length</span>
+            <input type="number" id="letterLength" value="120" min="1" max="2000">
+            <button class="btn" id="letterBrowseBtn">Go</button>
+            <button class="ghost" id="letterRandomBtn">Random</button>
+            <button class="ghost" id="letterCopyBtn">Copy</button>
+        </div>
+        <div class="mono" id="letterDisplay"></div>
+    </div>
+</section>
+
+<!-- IMAGE -->
+<section class="view" id="image">
+    <div class="card">
+        <h2 class="section-title">Browse pi as an image</h2>
+        <p class="section-sub">Every digit becomes one pixel, colored by the palette below (or grayscale by raw value).</p>
+        <div class="row">
+            <span class="label">Offset</span>
+            <input type="number" id="imgOffset" value="0" min="0">
+            <span class="label">Width</span>
+            <input type="number" id="imgWidth" value="20" min="1" max="40">
+            <span class="label">Height</span>
+            <input type="number" id="imgHeight" value="20" min="1" max="40">
+            <select id="imgMode">
+                <option value="color">Color</option>
+                <option value="grayscale">Black &amp; white</option>
+            </select>
+            <button class="btn" id="imgGoBtn">Go</button>
+            <button class="ghost" id="imgRandomBtn">Random</button>
+        </div>
+        <img class="pi-image" id="imgDisplay" alt="pi rendered as an image">
+
+        <div class="palette-grid" id="paletteGrid"></div>
+    </div>
+
+    <div class="card">
+        <h2 class="section-title">Search for an image</h2>
+        <p class="section-sub">
+            Upload an image — it's shrunk to a small grid, each cell matched to the
+            nearest palette color, and that color sequence is located in pi exactly
+            like a digit search. Keep the grid small; bigger patterns get astronomically rarer.
+        </p>
+        <div class="row">
+            <span class="label">Grid width</span>
+            <input type="number" id="searchImgWidth" value="6" min="2" max="12">
+            <span class="label">height</span>
+            <input type="number" id="searchImgHeight" value="6" min="2" max="12">
+        </div>
+        <div class="dropzone" id="dropzone">Click to choose an image, or drop one here</div>
+        <input type="file" id="imgFileInput" accept="image/*" style="display:none;">
+        <div class="result-line" id="imgSearchResult"></div>
+        <div class="image-preview" id="imgPreviewRow" style="display:none;">
+            <div class="col">
+                <img class="pi-image" id="uploadedPreview" style="width:150px;height:150px;object-fit:cover;">
+                <p>your image (quantized)</p>
+            </div>
+            <div class="col">
+                <img class="pi-image" id="matchedPreview" style="width:180px;">
+                <p id="matchedLabel">match in pi (outlined)</p>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- ABOUT -->
+<section class="view" id="about">
+    <div class="card about-body">
+        <h2 class="section-title">About this library</h2>
+        <p class="section-sub">
+            Pi's digits are conjectured (and, as far as anyone has ever checked, empirically
+            behave as if) normal — every finite digit string should appear somewhere in
+            them, given enough digits, the same way Borges' Library of Babel contains
+            every possible page. This app searches, browses, and renders a source file of
+            pi digits four different ways.
+        </p>
+
+        <h4>Speed</h4>
+        <p id="speedExplainer"></p>
+
+        <h4>Letters</h4>
+        <p>
+            Non-overlapping pairs of digits (00 through 99), mod 26, become one letter
+            A-Z — a genuine continuous decode of the whole digit stream, not something
+            computed only for search. If you had something else in mind for the
+            digit-to-letter mapping, it's isolated to <code>pairToLetter()</code> in
+            <code>src/piIndex.js</code> and easy to swap.
+        </p>
+
+        <h4>Colors</h4>
+        <div class="palette-grid" id="aboutPalette"></div>
+
+        <h4>Getting more digits</h4>
+        <p>
+            The default source is
+            <a href="https://stuff.mit.edu/afs/sipb/contrib/pi/pi-billion.txt" target="_blank" rel="noopener" style="color:#9ecbff;">stuff.mit.edu's 1-billion-digit file</a>.
+            For roughly 100 billion digits without needing ~100GB of disk, this app stores
+            digits packed 9-per-4-bytes (~44GB instead of ~100GB) — run
+            <code>node scripts/build-index.js file1.txt file2.txt ...</code> against
+            downloaded chunk(s) from a larger source (e.g. JA0HXV's 100-billion-digit
+            page, or pi2e.ch's chunked releases) to build it.
+        </p>
+
+        <h4>Status</h4>
+        <p id="aboutStatus"></p>
+    </div>
+</section>
+
+</div>
+
+<script>
+/* ============================================================
+   STATIC MODE — replaces the Node/Express server.
+   Everything /api/* used to do now runs in the browser, reading
+   pi's digits from chunk files in ./data (served by jsDelivr).
+   ============================================================ */
+(function () {
+  "use strict";
+  var realFetch = window.fetch.bind(window);
+
+  var REPO_BASES = [
+    "https://quantil.jsdelivr.net/gh/b4936955-hue/PiThing@latest/data/",
+    "https://cdn.jsdelivr.net/gh/b4936955-hue/PiThing@latest/data/",
+    "https://fastly.jsdelivr.net/gh/b4936955-hue/PiThing@latest/data/"
+  ];
+  var CONTEXT_RADIUS = 40, MAX_GRID = 40;
+
+  var PALETTE = [
+    { digit: 0, name: "black",       hex: "#000000", rgb: [0, 0, 0] },
+    { digit: 1, name: "orange",      hex: "#ff8c00", rgb: [255, 140, 0] },
+    { digit: 2, name: "green",       hex: "#1fa64a", rgb: [31, 166, 74] },
+    { digit: 3, name: "red",         hex: "#e8112d", rgb: [232, 17, 45] },
+    { digit: 4, name: "purple",      hex: "#8a2be2", rgb: [138, 43, 226] },
+    { digit: 5, name: "brown",       hex: "#8b5a2b", rgb: [139, 90, 43] },
+    { digit: 6, name: "pink",        hex: "#ff69b4", rgb: [255, 105, 180] },
+    { digit: 7, name: "gray",        hex: "#808080", rgb: [128, 128, 128] },
+    { digit: 8, name: "light green", hex: "#90ee90", rgb: [144, 238, 144] },
+    { digit: 9, name: "blue",        hex: "#1f75fe", rgb: [31, 117, 254] }
+  ];
+  function nearestDigit(r, g, b) {
+    var best = 0, bd = Infinity;
+    PALETTE.forEach(function (p) {
+      var d = (r - p.rgb[0]) * (r - p.rgb[0]) + (g - p.rgb[1]) * (g - p.rgb[1]) + (b - p.rgb[2]) * (b - p.rgb[2]);
+      if (d < bd) { bd = d; best = p.digit; }
+    });
+    return best;
+  }
+  function gray(d) { var v = Math.round(d / 9 * 255); return "rgb(" + v + "," + v + "," + v + ")"; }
+
+  /* ---------- data loading ---------- */
+  var base = null, meta = null, chunks = {}, letterChunks = {}, metaPromise = null;
+  function candidates() {
+    var list = [];
+    try { if (/^https?:$/.test(location.protocol)) list.push(new URL("data/", location.href).href); } catch (e) {}
+    return list.concat(REPO_BASES);
+  }
+  function getMeta() {
+    if (metaPromise) return metaPromise;
+    metaPromise = (async function () {
+      var list = candidates(), lastErr = "";
+      for (var i = 0; i < list.length; i++) {
+        try {
+          var r = await realFetch(list[i] + "meta.json", { cache: "no-cache" });
+          if (!r.ok) { lastErr = "HTTP " + r.status; continue; }
+          var m = await r.json();
+          if (m && m.chunkCount) { base = list[i]; meta = m; return m; }
+        } catch (e) { lastErr = e.message; }
+      }
+      metaPromise = null;
+      throw new Error("Could not load the pi data files (" + lastErr + "). Check that the data/ folder was pushed to GitHub.");
+    })();
+    return metaPromise;
+  }
+  async function chunk(i) {
+    await getMeta();
+    if (chunks[i] !== undefined) return chunks[i];
+    var r = await realFetch(base + "pi-" + i + ".bin");
+    if (!r.ok) throw new Error("Could not load data chunk " + i + " (HTTP " + r.status + ").");
+    var t = unpack(await r.arrayBuffer(), i === meta.chunkCount - 1 ? meta.digitCount - i * meta.chunkSize : meta.chunkSize);
+    var keys = Object.keys(chunks);
+    if (keys.length >= 3) delete chunks[keys[0]];   /* keep memory small: 3 decoded chunks at most */
+    chunks[i] = t;
+    return t;
+  }
+  /* packed9: every 4 bytes (big-endian uint32) holds 9 decimal digits */
+  function unpack(buf, count) {
+    var dv = new DataView(buf), blocks = buf.byteLength >> 2, out = new Uint8Array(blocks * 9);
+    for (var b = 0, p = 0; b < blocks; b++, p += 9) {
+      var v = dv.getUint32(b * 4, false);
+      for (var k = 8; k >= 0; k--) { out[p + k] = 48 + v % 10; v = (v / 10) | 0; }
+    }
+    return new TextDecoder("ascii").decode(count < out.length ? out.subarray(0, count) : out);
+  }
+  function pairsToLetters(d) {
+    var out = new Array(d.length >> 1);
+    for (var i = 0, j = 0; i + 1 < d.length; i += 2, j++) {
+      out[j] = String.fromCharCode(65 + ((d.charCodeAt(i) - 48) * 10 + (d.charCodeAt(i + 1) - 48)) % 26);
+    }
+    return out.join("");
+  }
+  async function letterChunk(i) {
+    return pairsToLetters(await chunk(i));
+  }
+
+  async function getDigits(offset, length) {
+    var m = await getMeta();
+    if (offset >= m.digitCount) throw new Error("Offset is past the end of the loaded digits (" + m.digitCount.toLocaleString() + ").");
+    var end = Math.min(offset + length, m.digitCount), out = "", pos = offset;
+    while (pos < end) {
+      var ci = Math.floor(pos / m.chunkSize), c = await chunk(ci), start = pos - ci * m.chunkSize;
+      var take = Math.min(end - pos, c.length - start);
+      if (take <= 0) break;
+      out += c.substr(start, take); pos += take;
+    }
+    return out;
+  }
+  async function getLetters(off, len) {
+    var m = await getMeta();
+    var digits = await getDigits(off * 2, len * 2);
+    return pairsToLetters(digits);
+  }
+  async function getColors(off, len) {
+    return (await getDigits(off, len)).split("").map(Number);
+  }
+
+  /* ---------- search ---------- */
+  var cache = {};
+  async function scan(kind, query, signal, onProgress) {
+    var m = await getMeta(), carry = "", n = m.chunkCount;
+    var per = kind === "d" ? m.chunkSize : Math.floor(m.chunkSize / 2);
+    for (var i = 0; i < n; i++) {
+      if (signal && signal.aborted) return { cancelled: true };
+      var text = kind === "d" ? await chunk(i) : await letterChunk(i);
+      var buf = carry + text, idx = buf.indexOf(query);
+      if (idx !== -1) return { offset: i * per - carry.length + idx };
+      carry = query.length > 1 ? buf.slice(-(query.length - 1)) : "";
+      onProgress((i + 1) / n);
+      await new Promise(function (r) { setTimeout(r, 0); });
+    }
+    return { offset: null };
+  }
+
+  function ndjson(job) {
+    return new Response(new ReadableStream({
+      start: function (ctl) {
+        var enc = new TextEncoder();
+        var write = function (o) { ctl.enqueue(enc.encode(JSON.stringify(o) + "\n")); };
+        job(write).then(function () { ctl.close(); }, function (e) {
+          if (e && e.name === "AbortError") ctl.error(e);
+          else { write({ type: "error", error: e.message }); ctl.close(); }
+        });
+      }
+    }), { status: 200, headers: { "Content-Type": "application/x-ndjson" } });
+  }
+  function json(obj, status) {
+    return new Response(JSON.stringify(obj), { status: status || 200, headers: { "Content-Type": "application/json" } });
+  }
+
+  function searchRoute(kind, init) {
+    var signal = init.signal;
+    return ndjson(async function (write) {
+      var body = {};
+      try { body = JSON.parse(init.body || "{}"); } catch (e) {}
+      var query = String(body.query || "").trim(), started = Date.now(), m = await getMeta();
+      if (kind === "d") {
+        if (!/^[0-9]+$/.test(query)) throw new Error("That query isn't made only of digits 0-9.");
+        if (query.length > 200) throw new Error("Search text is too long (200 digits max).");
+      } else {
+        query = query.toUpperCase().replace(/[^A-Z]/g, "");
+        if (!query) throw new Error("Enter at least one letter A-Z.");
+      }
+      var key = kind + ":" + query, res, tier = "cdn";
+      if (cache[key] !== undefined) { res = { offset: cache[key] }; tier = "cache"; }
+      else {
+        var last = 0;
+        res = await scan(kind, query, signal, function (f) {
+          var now = Date.now();
+          if (now - last > 120) { last = now; write({ type: "progress", fraction: f }); }
+        });
+        if (res.cancelled) {
+          var err = new Error("Aborted"); err.name = "AbortError"; throw err;
+        }
+        cache[key] = res.offset;
+      }
+      var total = kind === "d" ? m.digitCount : Math.floor(m.digitCount / 2);
+      var elapsedMs = Date.now() - started;
+      if (res.offset === null) { write({ type: "result", found: false, tier: tier, elapsedMs: elapsedMs, total: total }); return; }
+      var off = res.offset, start = Math.max(0, off - CONTEXT_RADIUS), get = kind === "d" ? getDigits : getLetters;
+      var context = {
+        before: await get(start, off - start),
+        match: await get(off, query.length),
+        after: off + query.length >= total ? "" : await get(off + query.length, CONTEXT_RADIUS),
+        contextStart: start
+      };
+      write({ type: "result", found: true, offset: off, tier: tier, elapsedMs: elapsedMs, total: total, context: context });
+    });
+  }
+
+  /* ---------- images ---------- */
+  function renderSvg(cols, width, height, mode, hl) {
+    var cell = 12, r = [];
+    for (var i = 0; i < cols.length; i++) {
+      var x = (i % width) * cell, y = Math.floor(i / width) * cell;
+      var fill = mode === "grayscale" ? gray(cols[i]) : PALETTE[cols[i]].hex;
+      r.push('<rect x="' + x + '" y="' + y + '" width="' + cell + '" height="' + cell + '" fill="' + fill + '"/>');
+    }
+    var border = hl ? '<rect x="' + hl.x * cell + '" y="' + hl.y * cell + '" width="' + hl.w * cell + '" height="' + hl.h * cell + '" fill="none" stroke="#ffffff" stroke-width="2"/>' : "";
+    return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ' + width * cell + " " + height * cell + '" width="' + width * cell + '" height="' + height * cell + '">' + r.join("") + border + "</svg>";
+  }
+  function dataUri(svg) { return "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg); }
+  function clamp(v, lo, hi, d) { v = Number(v) || d; return Math.min(hi, Math.max(lo, v)); }
+
+  async function imageUrl(offset, width, height, mode) {
+    offset = Math.max(0, Number(offset) || 0);
+    width = clamp(width, 1, MAX_GRID, 20); height = clamp(height, 1, MAX_GRID, 20);
+    var cols = await getColors(offset, width * height);
+    return dataUri(renderSvg(cols, width, height, mode === "grayscale" ? "grayscale" : "color"));
+  }
+  async function imageContextUrl(matchOffset, width, height, mode) {
+    matchOffset = Math.max(0, Number(matchOffset) || 0);
+    width = clamp(width, 1, 20, 6); height = clamp(height, 1, 20, 6);
+    var pad = 2, tw = width + pad * 2, th = height + pad * 2, co = Math.max(0, matchOffset - pad * tw);
+    var cols = await getColors(co, tw * th);
+    return dataUri(renderSvg(cols, tw, th, mode === "grayscale" ? "grayscale" : "color", { x: pad, y: pad, w: width, h: height }));
+  }
+
+  async function imageSearch(init) {
+    var form = init.body, file = form.get("image");
+    if (!file) throw new Error("No image uploaded.");
+    var width = clamp(form.get("width"), 2, 12, 6), height = clamp(form.get("height"), 2, 12, 6);
+    var bmp = await createImageBitmap(file);
+    var cv = document.createElement("canvas"); cv.width = width; cv.height = height;
+    var cx = cv.getContext("2d", { willReadFrequently: true });
+    cx.imageSmoothingEnabled = true; cx.imageSmoothingQuality = "high";
+    cx.fillStyle = "#fff"; cx.fillRect(0, 0, width, height);
+    cx.drawImage(bmp, 0, 0, width, height);
+    var data = cx.getImageData(0, 0, width, height).data, pattern = [];
+    for (var i = 0; i < width * height; i++) pattern.push(nearestDigit(data[i * 4], data[i * 4 + 1], data[i * 4 + 2]));
+    var query = pattern.join(""), started = Date.now(), m = await getMeta(), key = "d:" + query, tier = "cdn", off;
+    if (cache[key] !== undefined) { off = cache[key]; tier = "cache"; }
+    else { off = (await scan("d", query, null, function () {})).offset; cache[key] = off; }
+    return { success: true, found: off !== null, offset: off, tier: tier, elapsedMs: Date.now() - started,
+             width: width, height: height, pattern: pattern, digitCount: m.digitCount };
+  }
+
+  /* ---------- the fake server ---------- */
+  async function route(url, init) {
+    var u = new URL(url, "http://x"), p = u.pathname, q = u.searchParams;
+    try {
+      if (p === "/api/status") {
+        var m = await getMeta();
+        return json({ ready: true, digitCount: m.digitCount, letterCount: Math.floor(m.digitCount / 2),
+          format: "packed9", tier: "static", ramBudgetMB: 0, remote: false, remoteUrl: null, remoteError: null, static: true,
+          palette: PALETTE.map(function (x) { return { digit: x.digit, name: x.name, hex: x.hex }; }) });
+      }
+      if (p === "/api/digits" || p === "/api/letters") {
+        var off = Math.max(0, Number(q.get("offset")) || 0), len = clamp(q.get("length"), 1, 2000, 100);
+        if (p === "/api/digits") return json({ success: true, offset: off, digits: await getDigits(off, len) });
+        return json({ success: true, offset: off, letters: await getLetters(off, len) });
+      }
+      if (p === "/api/search/digits") return searchRoute("d", init);
+      if (p === "/api/search/letters") return searchRoute("l", init);
+      if (p === "/api/search/image") return json(await imageSearch(init));
+      if (p === "/api/image") return new Response(await imageUrl(q.get("offset"), q.get("width"), q.get("height"), q.get("mode")));
+    } catch (e) { return json({ success: false, error: e.message }, 400); }
+    return json({ success: false, error: "Unknown endpoint " + p }, 404);
+  }
+
+  window.fetch = function (input, init) {
+    var url = typeof input === "string" ? input : (input && input.url) || "";
+    if (url.indexOf("/api/") === 0) return route(url, init || {});
+    return realFetch(input, init);
+  };
+  window.PiStatic = { imageUrl: imageUrl, imageContextUrl: imageContextUrl, getDigits: getDigits, getLetters: getLetters };
+})();
+
+</script>
+
+<script>
+
+const views = ["digits", "letters", "image", "about"];
+
+document.querySelectorAll("nav button").forEach(btn => {
+    btn.addEventListener("click", () => navigateTo(btn.dataset.nav));
+});
+
+function navigateTo(name) {
+    for (const v of views) {
+        document.getElementById(v).classList.toggle("visible", v === name);
+    }
+    for (const btn of document.querySelectorAll("nav button")) {
+        btn.classList.toggle("active", btn.dataset.nav === name);
+    }
+    location.hash = "#" + name;
+    if (name === "about") loadStatus();
+}
+
+async function api(method, url, body, isForm) {
+    const opts = { method };
+    if (body) {
+        if (isForm) {
+            opts.body = body;
+        } else {
+            opts.headers = { "Content-Type": "application/json" };
+            opts.body = JSON.stringify(body);
+        }
+    }
+    const res = await fetch(url, opts);
+    const contentType = res.headers.get("content-type") || "";
+    if (!contentType.includes("application/json")) {
+        const text = await res.text();
+        throw new Error(
+            `Expected JSON from ${url} but got "${contentType || "unknown"}" (status ${res.status}). ` +
+            `First bytes: ${text.slice(0, 80)}`
+        );
+    }
+    return res.json();
+}
+
+function fmtNum(n) {
+    return Number(n || 0).toLocaleString();
+}
+
+function escapeHtml(s) {
+    return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+let digitCount = 0;
+let letterCount = 0;
+let palette = [];
+let currentTier = null;
+
+async function loadStatus() {
+    try {
+        const status = await api("GET", "/api/status");
+        digitCount = status.digitCount;
+        letterCount = status.letterCount;
+        palette = status.palette;
+        currentTier = status.tier;
+
+        document.getElementById("notReadyBanner").style.display = status.ready ? "none" : "block";
+
+        const tierNote = {
+            "ram-ascii": "held fully decoded in RAM — searches are near-instant.",
+            "ram-packed": "held packed in RAM, decoded on demand — fast, no disk I/O.",
+            "disk": "too large for the RAM budget — searches stream from disk and can take a while."
+        }[status.tier] || "";
+
+        if (status.static) {
+            document.getElementById("aboutStatus").textContent =
+                `Loaded: ${fmtNum(status.digitCount)} digits (${fmtNum(status.letterCount)} letters). Stored packed 9 digits per 4 bytes (about 44 MB total) and searched in your browser.`;
+            document.getElementById("speedExplainer").textContent =
+                "This is the static version: no server runs anywhere. Your browser downloads the packed digit files it needs (about 4 MB each, cached after the first load), unpacks them, and does the searching itself. A search that has to scan everything downloads about 44 MB the first time.";
+        } else
+        document.getElementById("aboutStatus").textContent = status.ready
+            ? `Loaded: ${fmtNum(status.digitCount)} digits (${fmtNum(status.letterCount)} letters). ` +
+              `Format: ${status.format}. Speed tier: ${status.tier} (RAM budget ${fmtNum(status.ramBudgetMB)}MB).`
+            : "No digit file loaded yet.";
+
+        if (!status.static) document.getElementById("speedExplainer").textContent =
+            `This app auto-picks a speed tier based on how the current digit file's size compares to a RAM ` +
+            `budget (${fmtNum(status.ramBudgetMB)}MB, set via the PI_MAX_RAM_MB environment variable). Right now it's ` +
+            `running in "${status.tier}" mode: ${tierNote}`;
+
+        document.getElementById("digitProbabilityHint").textContent =
+            `Find where a number appears in pi. Digits only. ` +
+            (status.ready ? `A specific N-digit number is expected roughly once every 10^N digits — so in the ` +
+              `current ${fmtNum(status.digitCount)}-digit set, don't expect much luck past ` +
+              `${String(status.digitCount).length - 1} digits.` : "");
+
+        renderPaletteGrid("paletteGrid");
+        renderPaletteGrid("aboutPalette");
+    } catch {
+        // Status is non-critical for most views.
+    }
+}
+
+function renderPaletteGrid(id) {
+    const el = document.getElementById(id);
+    if (!el || !palette.length) return;
+    el.innerHTML = "";
+    for (const p of palette) {
+        const div = document.createElement("div");
+        div.className = "swatch";
+        div.innerHTML = `<span class="dot" style="background:${p.hex}"></span>${p.digit} = ${p.name}`;
+        el.appendChild(div);
+    }
+}
+
+/*
+============================================================
+SEARCH HISTORY (localStorage)
+============================================================
+*/
+
+function loadHistory(kind) {
+    try {
+        return JSON.parse(localStorage.getItem("piHistory:" + kind) || "[]");
+    } catch {
+        return [];
+    }
+}
+
+function pushHistory(kind, query, offset) {
+    const list = loadHistory(kind).filter(h => h.query !== query);
+    list.unshift({ query, offset, ts: Date.now() });
+    localStorage.setItem("piHistory:" + kind, JSON.stringify(list.slice(0, 12)));
+    renderHistory(kind);
+}
+
+function renderHistory(kind) {
+    const el = document.getElementById(kind + "History");
+    const list = loadHistory(kind);
+    el.innerHTML = "";
+    if (!list.length) return;
+
+    const label = document.createElement("span");
+    label.className = "label";
+    label.textContent = "Recent:";
+    el.appendChild(label);
+
+    for (const h of list) {
+        const chip = document.createElement("button");
+        chip.className = "chip";
+        chip.textContent = h.query;
+        chip.addEventListener("click", () => {
+            document.getElementById(kind + "SearchInput").value = h.query;
+            document.getElementById(kind + "SearchBtn").click();
+        });
+        el.appendChild(chip);
+    }
+}
+
+/*
+============================================================
+NDJSON SEARCH (shared by digits + letters)
+============================================================
+*/
+
+async function runNdjsonSearch(kind, query, { onProgress, signal }) {
+    const endpoint = kind === "digit" ? "digits" : kind === "letter" ? "letters" : kind;
+    const res = await fetch(`/api/search/${endpoint}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query }),
+        signal
+    });
+
+    const contentType = res.headers.get("content-type") || "";
+    if (!contentType.includes("application/x-ndjson")) {
+        const text = await res.text();
+        throw new Error(
+            `Expected NDJSON from /api/search/${endpoint} but got "${contentType || "unknown"}" (status ${res.status}). ` +
+            `First bytes: ${text.slice(0, 80)}`
+        );
+    }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let finalResult = null;
+
+    while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop();
+
+        for (const line of lines) {
+            if (!line.trim()) continue;
+            const msg = JSON.parse(line);
+            if (msg.type === "progress" && onProgress) onProgress(msg.fraction);
+            if (msg.type === "result" || msg.type === "cancelled" || msg.type === "error") finalResult = msg;
+        }
+    }
+
+    return finalResult;
+}
+
+function renderContext(el, context, highlightClass) {
+    el.style.display = "block";
+    el.innerHTML = escapeHtml(context.before) +
+        `<mark>${escapeHtml(context.match)}</mark>` +
+        escapeHtml(context.after);
+}
+
+function setupSearch(kind) {
+    const input = document.getElementById(kind + "SearchInput");
+    const btn = document.getElementById(kind + "SearchBtn");
+    const cancelBtn = document.getElementById(kind + "CancelBtn");
+    const resultEl = document.getElementById(kind + "SearchResult");
+    const contextEl = document.getElementById(kind + "MatchContext");
+    const progressWrap = document.getElementById(kind + "ProgressWrap");
+    const progressFill = document.getElementById(kind + "ProgressFill");
+    const progressLabel = document.getElementById(kind + "ProgressLabel");
+
+    let controller = null;
+
+    async function doSearch(overrideQuery) {
+        const query = (overrideQuery ?? input.value).trim();
+        if (!query) return;
+        if (overrideQuery) input.value = overrideQuery;
+
+        contextEl.style.display = "none";
+        resultEl.className = "result-line";
+        resultEl.textContent = "Searching...";
+        btn.disabled = true;
+        cancelBtn.style.display = "inline-block";
+        progressWrap.classList.remove("visible");
+        progressFill.style.width = "0%";
+
+        controller = new AbortController();
+
+        try {
+            const result = await runNdjsonSearch(kind, query, {
+                signal: controller.signal,
+                onProgress: (fraction) => {
+                    progressWrap.classList.add("visible");
+                    const pct = Math.round(fraction * 100);
+                    progressFill.style.width = pct + "%";
+                    progressLabel.textContent = pct + "%";
+                }
+            });
+
+            progressWrap.classList.remove("visible");
+
+            if (!result || result.type === "error") {
+                resultEl.className = "result-line err";
+                resultEl.textContent = (result && result.error) || "Search failed.";
+                return;
+            }
+
+            if (result.type === "cancelled") {
+                resultEl.className = "result-line";
+                resultEl.textContent = "Search cancelled.";
+                return;
+            }
+
+            const tierLabel = result.tier === "cache" ? "cached" : result.tier;
+
+            if (result.found) {
+                resultEl.className = "result-line ok";
+                resultEl.innerHTML =
+                    `Found at ${kind === "digit" ? "digit" : "letter"} <code>${fmtNum(result.offset)}</code> ` +
+                    `(of ${fmtNum(result.total)}) — ${result.elapsedMs}ms, ${tierLabel}.`;
+                renderContext(contextEl, result.context);
+
+                if (kind === "digit") document.getElementById("digitOffset").value = result.offset;
+                else document.getElementById("letterOffset").value = result.offset;
+
+                pushHistory(kind, query, result.offset);
+            } else {
+                resultEl.className = "result-line err";
+                resultEl.textContent = `Not found in the current digit set — ${result.elapsedMs}ms, ${tierLabel}.`;
+            }
+        } catch (e) {
+            if (e.name === "AbortError") {
+                resultEl.className = "result-line";
+                resultEl.textContent = "Search cancelled.";
+            } else {
+                resultEl.className = "result-line err";
+                resultEl.textContent = e.message;
+            }
+        } finally {
+            btn.disabled = false;
+            cancelBtn.style.display = "none";
+            progressWrap.classList.remove("visible");
+        }
+    }
+
+    btn.addEventListener("click", () => doSearch());
+    input.addEventListener("keydown", e => { if (e.key === "Enter") doSearch(); });
+    cancelBtn.addEventListener("click", () => controller && controller.abort());
+
+    renderHistory(kind);
+
+    return doSearch;
+}
+
+const runDigitSearch = setupSearch("digit");
+const runLetterSearch = setupSearch("letter");
+
+/*
+============================================================
+LANDMARKS + DATE FINDER
+============================================================
+*/
+
+const LANDMARKS = [
+    { label: "Feynman Point (999999)", query: "999999" },
+    { label: "Ascending run", query: "123456789" },
+    { label: "e's digits", query: "2718281828" },
+    { label: "10 zeros", query: "0000000000" }
+];
+
+function renderLandmarks() {
+    const el = document.getElementById("digitLandmarks");
+    el.innerHTML = "";
+    const label = document.createElement("span");
+    label.className = "label";
+    label.textContent = "Try:";
+    el.appendChild(label);
+    for (const l of LANDMARKS) {
+        const chip = document.createElement("button");
+        chip.className = "chip";
+        chip.textContent = l.label;
+        chip.addEventListener("click", () => runDigitSearch(l.query));
+        el.appendChild(chip);
+    }
+}
+renderLandmarks();
+
+function renderDateButtons() {
+    const el = document.getElementById("dateFormatButtons");
+    el.innerHTML = "";
+
+    const formats = [
+        { label: "MMDDYYYY", build: (m, d, y) => `${m}${d}${y}` },
+        { label: "DDMMYYYY", build: (m, d, y) => `${d}${m}${y}` },
+        { label: "YYYYMMDD", build: (m, d, y) => `${y}${m}${d}` },
+        { label: "MMDDYY", build: (m, d, y) => `${m}${d}${y.slice(-2)}` }
+    ];
+
+    for (const f of formats) {
+        const chip = document.createElement("button");
+        chip.className = "chip";
+        chip.textContent = f.label;
+        chip.addEventListener("click", () => {
+            const m = String(document.getElementById("dateMonth").value || "").padStart(2, "0");
+            const d = String(document.getElementById("dateDay").value || "").padStart(2, "0");
+            const y = String(document.getElementById("dateYear").value || "").padStart(4, "0");
+            if (!Number(m) || !Number(d) || !Number(y)) {
+                alert("Enter a month, day, and year first.");
+                return;
+            }
+            runDigitSearch(f.build(m, d, y));
+        });
+        el.appendChild(chip);
+    }
+}
+renderDateButtons();
+
+/*
+============================================================
+BROWSE — digits / letters
+============================================================
+*/
+
+async function browseDigits() {
+    const offset = Math.max(0, Number(document.getElementById("digitOffset").value) || 0);
+    const length = Math.max(1, Number(document.getElementById("digitLength").value) || 120);
+    try {
+        const result = await api("GET", `/api/digits?offset=${offset}&length=${length}`);
+        document.getElementById("digitDisplay").textContent = result.digits || "";
+    } catch {
+        document.getElementById("digitDisplay").textContent = "";
+    }
+}
+
+document.getElementById("digitBrowseBtn").addEventListener("click", browseDigits);
+document.getElementById("digitRandomBtn").addEventListener("click", async () => {
+    if (!digitCount) await loadStatus();
+    const max = Math.max(1, digitCount - 500);
+    document.getElementById("digitOffset").value = Math.floor(Math.random() * max);
+    browseDigits();
+});
+document.getElementById("digitCopyBtn").addEventListener("click", () => {
+    navigator.clipboard?.writeText(document.getElementById("digitDisplay").textContent).catch(() => {});
+});
+
+async function browseLetters() {
+    const offset = Math.max(0, Number(document.getElementById("letterOffset").value) || 0);
+    const length = Math.max(1, Number(document.getElementById("letterLength").value) || 120);
+    try {
+        const result = await api("GET", `/api/letters?offset=${offset}&length=${length}`);
+        document.getElementById("letterDisplay").textContent = result.letters || "";
+    } catch {
+        document.getElementById("letterDisplay").textContent = "";
+    }
+}
+
+document.getElementById("letterBrowseBtn").addEventListener("click", browseLetters);
+document.getElementById("letterRandomBtn").addEventListener("click", async () => {
+    if (!letterCount) await loadStatus();
+    const max = Math.max(1, letterCount - 500);
+    document.getElementById("letterOffset").value = Math.floor(Math.random() * max);
+    browseLetters();
+});
+document.getElementById("letterCopyBtn").addEventListener("click", () => {
+    navigator.clipboard?.writeText(document.getElementById("letterDisplay").textContent).catch(() => {});
+});
+
+/*
+============================================================
+IMAGE — browse
+============================================================
+*/
+
+function refreshImageDisplay() {
+    const offset = Math.max(0, Number(document.getElementById("imgOffset").value) || 0);
+    const width = Math.max(1, Number(document.getElementById("imgWidth").value) || 20);
+    const height = Math.max(1, Number(document.getElementById("imgHeight").value) || 20);
+    const mode = document.getElementById("imgMode").value;
+
+    PiStatic.imageUrl(offset, width, height, mode).then(u => { document.getElementById("imgDisplay").src = u; })
+        .catch(e => alert(e.message));
+}
+
+document.getElementById("imgGoBtn").addEventListener("click", refreshImageDisplay);
+document.getElementById("imgMode").addEventListener("change", refreshImageDisplay);
+document.getElementById("imgRandomBtn").addEventListener("click", async () => {
+    if (!digitCount) await loadStatus();
+    const width = Number(document.getElementById("imgWidth").value) || 20;
+    const height = Number(document.getElementById("imgHeight").value) || 20;
+    const max = Math.max(1, digitCount - width * height);
+    document.getElementById("imgOffset").value = Math.floor(Math.random() * max);
+    refreshImageDisplay();
+});
+
+/*
+============================================================
+IMAGE — search
+============================================================
+*/
+
+const dropzone = document.getElementById("dropzone");
+const fileInput = document.getElementById("imgFileInput");
+
+dropzone.addEventListener("click", () => fileInput.click());
+dropzone.addEventListener("dragover", e => { e.preventDefault(); dropzone.classList.add("drag"); });
+dropzone.addEventListener("dragleave", () => dropzone.classList.remove("drag"));
+dropzone.addEventListener("drop", e => {
+    e.preventDefault();
+    dropzone.classList.remove("drag");
+    if (e.dataTransfer.files[0]) handleImageFile(e.dataTransfer.files[0]);
+});
+fileInput.addEventListener("change", () => {
+    if (fileInput.files[0]) handleImageFile(fileInput.files[0]);
+});
+
+async function handleImageFile(file) {
+    const el = document.getElementById("imgSearchResult");
+    const previewRow = document.getElementById("imgPreviewRow");
+    previewRow.style.display = "none";
+    el.className = "result-line";
+    el.textContent = "Searching...";
+
+    const width = Math.max(2, Number(document.getElementById("searchImgWidth").value) || 6);
+    const height = Math.max(2, Number(document.getElementById("searchImgHeight").value) || 6);
+
+    const form = new FormData();
+    form.append("image", file);
+    form.append("width", width);
+    form.append("height", height);
+
+    try {
+        const result = await api("POST", "/api/search/image", form, true);
+        if (!result.success) throw new Error(result.error);
+
+        document.getElementById("uploadedPreview").src = URL.createObjectURL(file);
+        const tierLabel = result.tier === "cache" ? "cached" : result.tier;
+
+        if (result.found) {
+            el.className = "result-line ok";
+            el.innerHTML = `Found at digit <code>${fmtNum(result.offset)}</code> (of ${fmtNum(result.digitCount)}) — ${result.elapsedMs}ms, ${tierLabel}.`;
+            PiStatic.imageContextUrl(result.offset, result.width, result.height, "color")
+                .then(u => { document.getElementById("matchedPreview").src = u; });
+            document.getElementById("matchedLabel").textContent = "match in pi (outlined)";
+            previewRow.style.display = "flex";
+        } else {
+            el.className = "result-line err";
+            el.textContent = `Not found — ${result.elapsedMs}ms, ${tierLabel}. Try a smaller grid or a simpler image.`;
+            previewRow.style.display = "flex";
+            document.getElementById("matchedPreview").src = "";
+            document.getElementById("matchedLabel").textContent = "not found";
+        }
+    } catch (e) {
+        el.className = "result-line err";
+        el.textContent = e.message;
+    }
+}
+
+/*
+============================================================
+BOOT
+============================================================
+*/
+
+function boot() {
+    const name = location.hash.replace("#", "") || "digits";
+    if (views.includes(name)) navigateTo(name);
+    loadStatus().then(() => {
+        browseDigits();
+        browseLetters();
+        refreshImageDisplay();
+    });
+}
+
+boot();
+
+</script>
+</body>
+</html>
