@@ -2,7 +2,7 @@
 setlocal EnableExtensions
 cd /d "%~dp0"
 
-set "REMOTE_URL=https://github.com/b4936955-hue/G4m3s123"
+set "REMOTE_URL=https://github.com/b4936955-hue/PiThing"
 set "BRANCH="
 set "REMOTE_HEAD="
 set "CURRENT_REMOTE="
