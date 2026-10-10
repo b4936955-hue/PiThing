@@ -217,6 +217,9 @@ function main() {
     const page = fs.readFileSync(path.join(ROOT, "github", "index.html"));
     writeIfChanged(path.join(DOCS_DIR, "index.html"), page);
     writeIfChanged(path.join(ROOT, "index.html"), page);
+    const searchWorker = fs.readFileSync(path.join(ROOT, "github", "search-worker.js"));
+    writeIfChanged(path.join(DOCS_DIR, "search-worker.js"), searchWorker);
+    writeIfChanged(path.join(ROOT, "search-worker.js"), searchWorker);
 
     removeStaleGeneratedChunks(metadata.chunkCount);
     for (const oldMetaPath of [

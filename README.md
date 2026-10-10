@@ -33,6 +33,10 @@ Browsing downloads only the chunks it needs; full searches scan chunks on
 demand in the browser. The root `index.html` is the default entry point for
 GitHub and jsDelivr. The browser version supports digit and letter
 search/browsing, date patterns, and digit-color images without an API server.
+Full searches use four parallel browser workers to fetch and scan separate
+chunk ranges without blocking the page. Searches that find no match still
+need to download and scan the complete packed index, so their speed depends
+on the browser's network connection and available CPU cores.
 
 `push.bat` builds the site, merges the latest `master` branch without replacing
 remote files, and pushes the repository configured in that file.

@@ -121,6 +121,8 @@ let chunkDigitCount = 0;
 let chunkCount = 0;
 const chunkCache = new Map();
 let imageFile = null;
+let searchInProgress = false;
+let searchWorkerUrlPromise;
 
 const byId = id => document.getElementById(id);
 const format = value => Number(value).toLocaleString();
@@ -255,20 +257,74 @@ function renderHistory(kind, items) {
   }
 }
 async function findMatch(kind, query) {
-  let carry = "";
-  for (let index = 0; index < chunkCount; index++) {
-    byId("loadStatus").textContent = `Searching ${format(Math.min((index + 1) * chunkDigitCount, digitCount))} of ${format(digitCount)} digits…`;
-    const chunk = await getChunk(index);
-    const segment = kind === "digit" ? chunk : makeLetters(chunk);
-    const combined = carry + segment;
-    const matchIndex = combined.indexOf(query);
-    if (matchIndex >= 0) {
-      const unitsPerChunk = kind === "digit" ? chunkDigitCount : chunkDigitCount / 2;
-      return index * unitsPerChunk - carry.length + matchIndex;
-    }
-    carry = combined.slice(Math.max(0, combined.length - query.length + 1));
+  if (!searchWorkerUrlPromise) {
+    searchWorkerUrlPromise = fetch(new URL("search-worker.js", document.baseURI))
+      .then(response => {
+        if (!response.ok) throw new Error(`Could not load the parallel search worker (HTTP ${response.status}).`);
+        return response.text();
+      })
+      .then(source => URL.createObjectURL(new Blob([source], { type: "text/javascript" })))
+      .catch(error => {
+        searchWorkerUrlPromise = undefined;
+        throw error;
+      });
   }
-  return -1;
+  const workerUrl = await searchWorkerUrlPromise;
+  const workerCount = Math.min(4, chunkCount);
+  const workers = [];
+  const jobs = [];
+  const completedChunks = new Set();
+
+  try {
+    for (let workerIndex = 0; workerIndex < workerCount; workerIndex++) {
+      const worker = new Worker(workerUrl);
+      workers.push(worker);
+      const unitsPerChunk = kind === "digit" ? chunkDigitCount : chunkDigitCount / 2;
+      const startChunk = Math.floor(chunkCount * workerIndex / workerCount);
+      const endChunk = Math.floor(chunkCount * (workerIndex + 1) / workerCount);
+      const totalUnits = kind === "digit" ? digitCount : Math.floor(digitCount / 2);
+      jobs.push(new Promise(resolve => {
+        worker.onmessage = event => {
+          const message = event.data;
+          if (message.type === "progress") {
+            completedChunks.add(message.chunkIndex);
+            byId("loadStatus").textContent =
+              `Searching ${format(Math.min(completedChunks.size * chunkDigitCount, digitCount))} of ${format(digitCount)} digits (${workerCount} workers)…`;
+          } else if (message.type === "done") {
+            resolve({ offset: message.offset });
+          } else if (message.type === "error") {
+            resolve({ error: new Error(message.message) });
+          }
+        };
+        worker.onerror = event => resolve({ error: new Error(event.message || "The parallel search worker failed.") });
+        try {
+          worker.postMessage({
+            kind,
+            query,
+            baseUrl: document.baseURI,
+            digitCount,
+            chunkDigitCount,
+            startChunk: Math.max(0, startChunk - (workerIndex > 0 ? 1 : 0)),
+            endChunk: Math.min(chunkCount, endChunk + (workerIndex + 1 < workerCount ? 1 : 0)),
+            minOffset: startChunk * unitsPerChunk,
+            maxOffset: Math.min(endChunk * unitsPerChunk, totalUnits)
+          });
+        } catch (error) {
+          resolve({ error });
+        }
+      }));
+    }
+
+    for (const job of jobs) {
+      const result = await job;
+      if (result.error) throw result.error;
+      const offset = result.offset;
+      if (offset >= 0) return offset;
+    }
+    return -1;
+  } finally {
+    workers.forEach(worker => worker.terminate());
+  }
 }
 async function search(kind, value) {
   const input = byId(kind === "digit" ? "digitQuery" : "letterQuery");
@@ -283,36 +339,48 @@ async function search(kind, value) {
     showResult(resultId, "Search text is too long.", true);
     return;
   }
-  let offset;
+  if (searchInProgress) {
+    showResult(resultId, "A search is already running. Wait for it to finish before starting another.", true);
+    return;
+  }
+  searchInProgress = true;
   try {
-    offset = await findMatch(kind, query);
+    let offset;
+    try {
+      offset = await findMatch(kind, query);
+    } catch (error) {
+      showError(resultId, error);
+      byId("loadStatus").textContent = "Search could not be completed.";
+      return;
+    }
+    byId(contextId).hidden = true;
+    if (offset < 0) {
+      showResult(resultId, `Not found in the ${format(kind === "digit" ? digitCount : Math.floor(digitCount / 2))} available ${kind === "digit" ? "digits" : "letters"}.`, true);
+      byId("loadStatus").textContent = `Search complete: scanned ${format(digitCount)} digits.`;
+      return;
+    }
+    showResult(resultId, `Found at ${kind === "digit" ? "digit" : "letter"} offset ${format(offset)} (position ${format(offset + 1)}).`);
+    const contextStart = Math.max(0, offset - CONTEXT);
+    const beforeLength = offset - contextStart;
+    let context;
+    try {
+      context = kind === "digit"
+        ? await getDigitsAt(contextStart, beforeLength + query.length + CONTEXT)
+        : await getLettersAt(contextStart, beforeLength + query.length + CONTEXT);
+    } catch (error) {
+      showError(resultId, error);
+      byId("loadStatus").textContent = "Could not load match context.";
+      return;
+    }
+    renderContext(contextId, context, beforeLength, query);
+    byId("loadStatus").textContent = `Ready: ${format(digitCount)} digits and ${format(Math.floor(digitCount / 2))} letters.`;
+    addHistory(kind, query);
   } catch (error) {
     showError(resultId, error);
     byId("loadStatus").textContent = "Search could not be completed.";
-    return;
+  } finally {
+    searchInProgress = false;
   }
-  byId(contextId).hidden = true;
-  if (offset < 0) {
-    showResult(resultId, `Not found in the ${format(kind === "digit" ? digitCount : Math.floor(digitCount / 2))} available ${kind === "digit" ? "digits" : "letters"}.`, true);
-    byId("loadStatus").textContent = `Search complete: scanned ${format(digitCount)} digits.`;
-    return;
-  }
-  showResult(resultId, `Found at ${kind === "digit" ? "digit" : "letter"} offset ${format(offset)} (position ${format(offset + 1)}).`);
-  const contextStart = Math.max(0, offset - CONTEXT);
-  const beforeLength = offset - contextStart;
-  let context;
-  try {
-    context = kind === "digit"
-      ? await getDigitsAt(contextStart, beforeLength + query.length + CONTEXT)
-      : await getLettersAt(contextStart, beforeLength + query.length + CONTEXT);
-  } catch (error) {
-    showError(resultId, error);
-    byId("loadStatus").textContent = "Could not load match context.";
-    return;
-  }
-  renderContext(contextId, context, beforeLength, query);
-  byId("loadStatus").textContent = `Ready: ${format(digitCount)} digits and ${format(Math.floor(digitCount / 2))} letters.`;
-  addHistory(kind, query);
 }
 function setView(name) {
   document.querySelectorAll("main > section").forEach(section => section.classList.toggle("active", section.id === name));
