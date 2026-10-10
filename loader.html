@@ -39,8 +39,8 @@
             continue;
           }
           var html = await response.text();
-          if (html.indexOf("The Library of Pi") < 0 || html.indexOf("1_000_000_000") < 0) {
-            failures.push(sources[i] + " did not contain the billion-digit build");
+          if (html.indexOf("The Library of Pi") < 0 || html.indexOf("pi-index-meta.json") < 0) {
+            failures.push(sources[i] + " did not contain the packed-index build");
             continue;
           }
           var base = "<base href=\"" + sources[i] + "\">";

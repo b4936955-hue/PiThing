@@ -69,6 +69,9 @@ if errorlevel 1 (
   )
 )
 
+node scripts\push-chunks.js
+if errorlevel 1 goto :failed
+
 git add -A
 if errorlevel 1 goto :git_error
 git diff --cached --quiet
@@ -91,7 +94,7 @@ goto :failed
 
 :success
 echo.
-echo Push complete. The updated one-billion-digit app is available at the repository root.
+echo Push complete. The updated pi digit app is available at the repository root.
 echo GitHub Pages can also use the "%BRANCH%" branch and "/docs" folder.
 exit /b 0
 

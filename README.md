@@ -16,21 +16,23 @@ npm start
 ## GitHub Pages
 
 The Express app above needs Node.js and cannot run directly on GitHub Pages.
-For a static GitHub site, build the browser version with one billion digits
-from `data/pi-digits.bin`:
+For a static GitHub site, build the browser version from
+`data/first_10_billion_digits_of_pi.txt` (10 billion decimal digits, plus the
+leading `3` of pi):
 
 ```
 npm run build:github
 ```
 
-On Windows, `build.bat` runs the same build. It splits the packed index into
-112 nine-million-digit chunks (each under GitHub's 100 MB per-file limit),
-then writes the site to the repository root and `docs/`. The packed chunks
-remain packed in Git. Browsing downloads only the chunks it needs; full
-searches scan chunks on demand in the browser. The root `index.html` is the
-default entry point for GitHub and jsDelivr. The browser version supports
-digit and letter search/browsing, date patterns, and digit-color images
-without an API server.
+On Windows, `build.bat` runs the same build. The builder streams the digits
+from the text file, prepends pi's leading `3` (10,000,000,001 indexed digits),
+and writes the index as
+nine-million-digit packed chunks (about 4 MB each, below GitHub's 100 MB
+per-file limit). It writes the site to the repository root and `docs/`.
+Browsing downloads only the chunks it needs; full searches scan chunks on
+demand in the browser. The root `index.html` is the default entry point for
+GitHub and jsDelivr. The browser version supports digit and letter
+search/browsing, date patterns, and digit-color images without an API server.
 
 `push.bat` builds the site, merges the latest `master` branch without replacing
 remote files, and pushes the repository configured in that file.
@@ -40,9 +42,11 @@ repository. If GitHub Pages is used, select the `master` branch and `/docs`
 folder. If the repository has a different name or owner, update `REMOTE_URL`
 in `push.bat` and `USER`/`REPO` in `loader.html`.
 
-The original monolithic `data/pi-digits.bin` source is excluded from Git by
-`.gitignore`. The build commits the split packed chunks and can recreate the
-`docs/` copy from those chunks after cloning.
+The large source text and original monolithic `data/pi-digits.bin` are excluded
+from Git by `.gitignore`. The build commits the split packed chunks and can
+recreate the `docs/` copy from those chunks after cloning. Metadata records the
+actual indexed digit count, so the client can use larger indexes without a
+hard-coded one-billion-digit limit.
 
 ## Real data — local mode (fast, uses disk)
 

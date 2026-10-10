@@ -49,12 +49,12 @@
       <button data-view="about">About</button>
     </nav>
   </header>
-  <p id="loadStatus">Loading the billion-digit library…</p>
+  <p id="loadStatus">Loading the pi digit library…</p>
 
   <section id="digits" class="active">
     <div class="card">
       <h2>Search for digits</h2>
-      <p>Find a digit sequence in one billion digits of pi.</p>
+      <p>Find a digit sequence in the pi digits loaded from the packed index.</p>
       <div class="row"><input id="digitQuery" type="text" inputmode="numeric" maxlength="200" placeholder="e.g. 314159"><button class="primary" id="searchDigits">Search</button></div>
       <div id="digitResult" class="result" aria-live="polite"></div>
       <div id="digitContext" class="digits" hidden></div>
@@ -105,7 +105,7 @@
   <section id="about">
     <div class="card">
       <h2>About this build</h2>
-      <p id="aboutCount">One billion digits of pi, stored in packed chunks.</p>
+      <p id="aboutCount">Pi digits, stored in packed chunks.</p>
       <p>Browsing downloads only the chunks it needs. Searches scan the packed dataset in your browser without a server.</p>
       <div class="palette" id="palette"></div>
     </div>
@@ -141,7 +141,7 @@ function makeLetters(source) {
   for (let i = 0; i + 1 < source.length; i += 2) result += letterFor(source.slice(i, i + 2));
   return result;
 }
-function chunkName(index) { return `pi-billion-${String(index).padStart(3, "0")}.bin`; }
+function chunkName(index) { return `pi-chunk-${String(index).padStart(4, "0")}.bin`; }
 function expectedChunkDigits(index) { return Math.min(chunkDigitCount, digitCount - index * chunkDigitCount); }
 async function getChunk(index) {
   if (chunkCache.has(index)) {
@@ -374,7 +374,7 @@ byId("searchImage").addEventListener("click", async () => {
     let pattern = "";
     for (let i = 0; i < width * height; i++) pattern += nearestDigit(pixels[i * 4], pixels[i * 4 + 1], pixels[i * 4 + 2]);
     const offset = await findMatch("digit", pattern);
-    showResult("imageResult", offset < 0 ? "That color pattern was not found in the billion-digit set." : `Nearest color pattern found at digit ${format(offset)}.`);
+    showResult("imageResult", offset < 0 ? "That color pattern was not found in the available pi digits." : `Nearest color pattern found at digit ${format(offset)}.`);
     if (offset >= 0) {
       byId("imageOffset").value = offset;
       await drawImage(offset, width, height, byId("imageMode").value);
@@ -421,7 +421,7 @@ colors.forEach((hex, digit) => {
 
 async function boot() {
   try {
-    const response = await fetch("data/pi-billion-meta.json");
+    const response = await fetch("data/pi-index-meta.json");
     if (!response.ok) throw new Error(`Could not load the digit metadata (HTTP ${response.status}). Re-run build.bat and push.bat.`);
     const metadata = await response.json();
     if (metadata.format !== "packed9-le" || !Number.isSafeInteger(metadata.digitCount) ||
@@ -431,10 +431,13 @@ async function boot() {
     digitCount = metadata.digitCount;
     chunkDigitCount = metadata.chunkDigitCount;
     chunkCount = metadata.chunkCount;
-    if (digitCount !== 1_000_000_000 || chunkCount !== Math.ceil(digitCount / chunkDigitCount)) {
-      throw new Error("The deployed pi index does not contain the expected one billion digits.");
+    if (digitCount < 1 || chunkDigitCount < 9 || chunkDigitCount % 9 !== 0 ||
+        chunkCount !== Math.ceil(digitCount / chunkDigitCount) ||
+        metadata.pattern !== "pi-chunk-{index}.bin") {
+      throw new Error("The deployed pi index has inconsistent digit or chunk counts.");
     }
-    await getChunk(0);
+    const firstChunk = await getChunk(0);
+    if (!firstChunk.startsWith("3")) throw new Error("The packed pi index must start with the leading digit 3.");
     byId("loadStatus").textContent = `Ready: ${format(digitCount)} digits and ${format(Math.floor(digitCount / 2))} letters. Chunks load as needed.`;
     byId("aboutCount").textContent = `Loaded a ${format(digitCount)}-digit packed pi index (${format(Math.floor(digitCount / 2))} decoded letters).`;
     await renderDigits();

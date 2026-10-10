@@ -1,0 +1,7 @@
+{
+  "digitCount": 10000000001,
+  "chunkDigitCount": 9000000,
+  "chunkCount": 1112,
+  "format": "packed9-le",
+  "pattern": "pi-chunk-{index}.bin"
+}
