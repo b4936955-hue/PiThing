@@ -10,6 +10,7 @@ const BLOCK_BYTES = 4;
 const outputDir = path.join(ROOT, "docs");
 const outputDataDir = path.join(outputDir, "data");
 const outputDigits = path.join(outputDataDir, "pi-digits.txt");
+const rootDataDir = path.join(ROOT, "data");
 
 function writeFromPackedFile(filePath) {
     const fd = fs.openSync(filePath, "r");
@@ -71,8 +72,12 @@ function main() {
     }
 
     fs.copyFileSync(path.join(ROOT, "github", "index.html"), path.join(outputDir, "index.html"));
+    fs.mkdirSync(rootDataDir, { recursive: true });
+    fs.copyFileSync(path.join(ROOT, "github", "index.html"), path.join(ROOT, "index.html"));
+    fs.copyFileSync(outputDigits, path.join(rootDataDir, "pi-digits.txt"));
     console.log(`GitHub Pages site built in ${path.relative(ROOT, outputDir)}.`);
     console.log(`Included exactly ${DIGIT_COUNT.toLocaleString()} digits in ${path.relative(ROOT, outputDigits)}.`);
+    console.log(`Root GitHub site built in ${path.relative(ROOT, "index.html")}.`);
 }
 
 try {

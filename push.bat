@@ -2,8 +2,8 @@
 setlocal EnableExtensions
 cd /d "%~dp0"
 
-set "REMOTE_URL=https://github.com/b4936955-hue/PiLibrary.git"
-set "BRANCH=main"
+set "REMOTE_URL=https://github.com/b4936955-hue/PiThing.git"
+set "BRANCH=master"
 set "GIT_NAME="
 set "GIT_EMAIL="
 
@@ -53,6 +53,22 @@ git branch --show-current | findstr /x /c:"%BRANCH%" >nul
 if errorlevel 1 git branch -M "%BRANCH%"
 if errorlevel 1 goto :git_error
 
+git fetch origin "%BRANCH%"
+if errorlevel 1 (
+  echo ERROR: Could not fetch origin/%BRANCH%. Check repository access and branch name.
+  goto :failed
+)
+git merge-base --is-ancestor "origin/%BRANCH%" HEAD
+if errorlevel 1 (
+  echo Bringing the latest GitHub changes into this folder before pushing...
+  git merge --no-edit "origin/%BRANCH%"
+  if errorlevel 1 (
+    echo.
+    echo The local and GitHub files conflict. Resolve the conflicts, then run push.bat again.
+    goto :failed
+  )
+)
+
 git add -A
 if errorlevel 1 goto :git_error
 git diff --cached --quiet
@@ -75,8 +91,8 @@ goto :failed
 
 :success
 echo.
-echo Push complete. In GitHub, enable Pages from the "%BRANCH%" branch and "/docs" folder.
-echo The site is built from docs\index.html and contains the first million digits.
+echo Push complete. The updated one-million-digit app is available at the repository root.
+echo GitHub Pages can also use the "%BRANCH%" branch and "/docs" folder.
 exit /b 0
 
 :git_error

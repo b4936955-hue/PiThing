@@ -16,23 +16,27 @@ npm start
 ## GitHub Pages
 
 The Express app above needs Node.js and cannot run directly on GitHub Pages.
-For a static Pages site, build the browser version with the first million
+For a static GitHub site, build the browser version with the first million
 digits from `data/pi-digits.bin`:
 
 ```
 npm run build:github
 ```
 
-On Windows, `build.bat` runs the same build. It writes a self-contained Pages
-site to `docs/`, including `docs/data/pi-digits.txt`; the original large index
-is not copied to the site. The browser version supports digit and letter
-search/browsing, date patterns, and digit-color images without an API server.
+On Windows, `build.bat` runs the same build. It writes the site to the
+repository root and to `docs/`, including the one-million-digit
+`data/pi-digits.txt`; the original large index is not copied to the site.
+The root `index.html` is the default entry point for GitHub and jsDelivr. The
+browser version supports digit and letter search/browsing, date patterns, and
+digit-color images without an API server.
 
-`push.bat` builds the site and pushes the repository configured in that file.
-The loader is `loader.html` and is configured for `b4936955-hue/PiLibrary`.
-After the first push, enable GitHub Pages in the repository settings using the
-`main` branch and `/docs` folder. If the repository has a different name or
-owner, update `REMOTE_URL` in `push.bat` and `USER`/`REPO` in `loader.html`.
+`push.bat` builds the site, merges the latest `master` branch without replacing
+remote files, and pushes the repository configured in that file.
+The loader is `loader.html` and is configured for `b4936955-hue/PiThing`.
+After the push, the loader reads the updated root `index.html` from the
+repository. If GitHub Pages is used, select the `master` branch and `/docs`
+folder. If the repository has a different name or owner, update `REMOTE_URL`
+in `push.bat` and `USER`/`REPO` in `loader.html`.
 
 The digit source is intentionally excluded from Git by `.gitignore`. A fresh
 clone can rebuild from the already generated `docs/data/pi-digits.txt` file

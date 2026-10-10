@@ -19,10 +19,12 @@
   <script>
     (async function () {
       var USER = "b4936955-hue";
-      var REPO = "PiLibrary";
+      var REPO = "PiThing";
       var branches = ["main", "master"];
       var sources = [];
       branches.forEach(function (branch) {
+        sources.push("https://cdn.jsdelivr.net/gh/" + USER + "/" + REPO + "@" + branch + "/");
+        sources.push("https://raw.githubusercontent.com/" + USER + "/" + REPO + "/" + branch + "/");
         sources.push("https://cdn.jsdelivr.net/gh/" + USER + "/" + REPO + "@" + branch + "/docs/");
         sources.push("https://raw.githubusercontent.com/" + USER + "/" + REPO + "/" + branch + "/docs/");
       });
@@ -54,7 +56,7 @@
       var loader = document.getElementById("loader");
       loader.innerHTML = "<h1>Loader failed</h1><p id=\"error\"></p><button onclick=\"location.reload()\">Retry</button>";
       document.getElementById("error").textContent =
-        "Could not load " + USER + "/" + REPO + ". Run build.bat and push.bat first.\n" + failures.join("\n");
+        "Could not load the built site from " + USER + "/" + REPO + ". Run build.bat and push.bat first.\n" + failures.join("\n");
     })();
   </script>
 </body>

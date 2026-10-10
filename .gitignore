@@ -1,5 +1,6 @@
 node_modules/
 data/pi-raw.txt
 data/pi-digits.txt
+!data/pi-digits.txt
 data/pi-digits.bin
 data/meta.json
