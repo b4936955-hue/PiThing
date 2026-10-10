@@ -20,14 +20,13 @@
     (async function () {
       var USER = "b4936955-hue";
       var REPO = "PiThing";
-      var branches = ["master", "main"];
-      var sources = [];
-      branches.forEach(function (branch) {
-        sources.push("https://raw.githubusercontent.com/" + USER + "/" + REPO + "/" + branch + "/");
-        sources.push("https://cdn.jsdelivr.net/gh/" + USER + "/" + REPO + "@" + branch + "/");
-        sources.push("https://raw.githubusercontent.com/" + USER + "/" + REPO + "/" + branch + "/docs/");
-        sources.push("https://cdn.jsdelivr.net/gh/" + USER + "/" + REPO + "@" + branch + "/docs/");
-      });
+      var REVISION = "7707caf57bbe53db698d40fa6c5c125b1282331e";
+      var sources = [
+        "https://raw.githubusercontent.com/" + USER + "/" + REPO + "/" + REVISION + "/",
+        "https://cdn.jsdelivr.net/gh/" + USER + "/" + REPO + "@" + REVISION + "/",
+        "https://raw.githubusercontent.com/" + USER + "/" + REPO + "/" + REVISION + "/docs/",
+        "https://cdn.jsdelivr.net/gh/" + USER + "/" + REPO + "@" + REVISION + "/docs/"
+      ];
       var status = document.getElementById("status");
       var failures = [];
       for (var i = 0; i < sources.length; i++) {
