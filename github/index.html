@@ -1,0 +1,350 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>The Library of Pi</title>
+  <style>
+    :root { color-scheme: dark; font: 15px Arial, sans-serif; background: #09090b; color: #eee; }
+    * { box-sizing: border-box; }
+    body { margin: 0; }
+    main { width: min(900px, 100%); margin: auto; padding: 20px 18px 60px; }
+    header, nav, .row, .chips { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+    header { justify-content: space-between; margin-bottom: 24px; }
+    h1 { font-size: 18px; margin: 0; }
+    h2 { font-size: 15px; margin: 0 0 6px; }
+    p { color: #92929a; font-size: 13px; line-height: 1.5; }
+    nav button, button { cursor: pointer; }
+    nav button, .secondary, .chip { background: transparent; border: 1px solid #29292e; color: #c5c5cc; border-radius: 8px; padding: 8px 11px; }
+    nav button.active, .primary { background: #eee; border-color: #eee; color: #09090b; font-weight: 700; }
+    section { display: none; }
+    section.active { display: block; }
+    .card { background: #101012; border: 1px solid #222226; border-radius: 12px; padding: 18px; margin: 14px 0; }
+    input, select { background: #111114; border: 1px solid #303036; border-radius: 8px; color: #eee; padding: 9px 10px; min-width: 0; }
+    input[type="text"] { flex: 1; }
+    input[type="number"] { width: 110px; }
+    .row { margin-top: 12px; }
+    .result { min-height: 22px; color: #9de9bc; font-size: 13px; }
+    .error { color: #ff9292; }
+    .digits { font: 15px/1.8 "Courier New", monospace; overflow-wrap: anywhere; background: #0b0b0e; padding: 14px; border-radius: 8px; margin-top: 12px; }
+    mark { background: #ffcf3a; color: #09090b; }
+    .chips { margin-top: 12px; }
+    .chip { border-radius: 999px; font-size: 12px; }
+    .palette { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; color: #bbb; font-size: 12px; }
+    .swatch { display: flex; align-items: center; gap: 5px; }
+    .dot { width: 13px; height: 13px; border-radius: 4px; border: 1px solid #555; }
+    canvas { image-rendering: pixelated; max-width: 100%; border: 1px solid #333; margin-top: 10px; }
+    .muted { color: #77777d; font-size: 12px; }
+    @media (max-width: 520px) { header { align-items: flex-start; flex-direction: column; } nav { width: 100%; } }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>The Library of Pi</h1>
+    <nav aria-label="Views">
+      <button class="active" data-view="digits">Digits</button>
+      <button data-view="letters">Letters</button>
+      <button data-view="image">Images</button>
+      <button data-view="about">About</button>
+    </nav>
+  </header>
+  <p id="loadStatus">Loading the million-digit library…</p>
+
+  <section id="digits" class="active">
+    <div class="card">
+      <h2>Search for digits</h2>
+      <p>Find a digit sequence in the first million digits of pi.</p>
+      <div class="row"><input id="digitQuery" type="text" inputmode="numeric" maxlength="200" placeholder="e.g. 314159"><button class="primary" id="searchDigits">Search</button></div>
+      <div id="digitResult" class="result" aria-live="polite"></div>
+      <div id="digitContext" class="digits" hidden></div>
+      <div class="chips" id="landmarks"></div>
+      <div class="row">
+        <label for="dateMonth">Month</label><input id="dateMonth" type="number" min="1" max="12" placeholder="MM">
+        <label for="dateDay">Day</label><input id="dateDay" type="number" min="1" max="31" placeholder="DD">
+        <label for="dateYear">Year</label><input id="dateYear" type="number" min="1" max="9999" placeholder="YYYY">
+      </div>
+      <div class="chips" id="dateFormats"></div>
+      <div class="chips" id="history"></div>
+    </div>
+    <div class="card">
+      <h2>Browse digits</h2>
+      <p>Offset zero is the leading 3. The dataset includes one million digits total.</p>
+      <div class="row"><label for="digitOffset">Offset</label><input id="digitOffset" type="number" min="0" value="0"><label for="digitLength">Length</label><input id="digitLength" type="number" min="1" max="2000" value="120"><button class="primary" id="browseDigits">Browse</button><button class="secondary" id="randomDigits">Random</button><button class="secondary" id="copyDigits">Copy</button></div>
+      <div id="digitDisplay" class="digits"></div>
+    </div>
+  </section>
+
+  <section id="letters">
+    <div class="card">
+      <h2>Search for letters</h2>
+      <p>Pi is decoded in non-overlapping pairs: each pair of digits modulo 26 becomes A–Z.</p>
+      <div class="row"><input id="letterQuery" type="text" maxlength="100" placeholder="e.g. HELLO"><button class="primary" id="searchLetters">Search</button></div>
+      <div id="letterResult" class="result" aria-live="polite"></div>
+      <div id="letterContext" class="digits" hidden></div>
+      <div class="chips" id="letterHistory"></div>
+    </div>
+    <div class="card">
+      <h2>Browse letters</h2>
+      <div class="row"><label for="letterOffset">Letter offset</label><input id="letterOffset" type="number" min="0" value="0"><label for="letterLength">Length</label><input id="letterLength" type="number" min="1" max="2000" value="120"><button class="primary" id="browseLetters">Browse</button><button class="secondary" id="randomLetters">Random</button><button class="secondary" id="copyLetters">Copy</button></div>
+      <div id="letterDisplay" class="digits"></div>
+    </div>
+  </section>
+
+  <section id="image">
+    <div class="card">
+      <h2>Pi as an image</h2>
+      <p>Each digit maps to a color. Browse a patch or upload an image to find its nearest color pattern in pi.</p>
+      <div class="row"><label for="imageOffset">Offset</label><input id="imageOffset" type="number" min="0" value="0"><label for="imageWidth">Width</label><input id="imageWidth" type="number" min="1" max="40" value="20"><label for="imageHeight">Height</label><input id="imageHeight" type="number" min="1" max="40" value="20"><select id="imageMode"><option value="color">Colors</option><option value="grayscale">Grayscale</option></select><button class="primary" id="renderImage">Render</button></div>
+      <canvas id="imageCanvas"></canvas>
+      <div class="row"><input id="imageFile" type="file" accept="image/*"><label for="searchWidth">Pattern width</label><input id="searchWidth" type="number" min="2" max="12" value="4"><label for="searchHeight">Pattern height</label><input id="searchHeight" type="number" min="2" max="12" value="4"><button class="primary" id="searchImage">Find image</button></div>
+      <div id="imageResult" class="result" aria-live="polite"></div>
+    </div>
+  </section>
+
+  <section id="about">
+    <div class="card">
+      <h2>About this build</h2>
+      <p id="aboutCount">A million digits of pi, bundled with this GitHub Pages site.</p>
+      <p>All browsing and searches run in your browser. The static GitHub-hosted version does not require a server or send your searches anywhere.</p>
+      <div class="palette" id="palette"></div>
+    </div>
+  </section>
+</main>
+<script>
+"use strict";
+const DIGIT_COUNT = 1_000_000;
+const CONTEXT = 40;
+const colors = ["#000000", "#ff8c00", "#1fa64a", "#e8112d", "#8a2be2", "#8b5a2b", "#ff69b4", "#808080", "#90ee90", "#1f75fe"];
+const colorNames = ["black", "orange", "green", "red", "purple", "brown", "pink", "gray", "light green", "blue"];
+let digits = "";
+let letters = "";
+let imageFile = null;
+
+const byId = id => document.getElementById(id);
+const format = value => Number(value).toLocaleString();
+const clamp = (value, low, high) => Math.min(high, Math.max(low, Math.floor(Number(value) || 0)));
+function showError(id, error) {
+  const el = byId(id);
+  el.classList.add("error");
+  el.textContent = error.message || String(error);
+}
+function showResult(id, message, isError) {
+  const el = byId(id);
+  el.classList.toggle("error", Boolean(isError));
+  el.textContent = message;
+}
+function letterFor(pair) { return String.fromCharCode(65 + (Number(pair) % 26)); }
+function makeLetters(source) {
+  let result = "";
+  for (let i = 0; i + 1 < source.length; i += 2) result += letterFor(source.slice(i, i + 2));
+  return result;
+}
+function renderContext(id, text, offset, query) {
+  const start = Math.max(0, offset - CONTEXT);
+  const before = text.slice(start, offset);
+  const match = text.slice(offset, offset + query.length);
+  const after = text.slice(offset + query.length, offset + query.length + CONTEXT);
+  const el = byId(id);
+  el.replaceChildren(document.createTextNode(before), Object.assign(document.createElement("mark"), { textContent: match }), document.createTextNode(after));
+  el.hidden = false;
+}
+function renderDigits() {
+  const offset = clamp(byId("digitOffset").value, 0, DIGIT_COUNT - 1);
+  const length = clamp(byId("digitLength").value, 1, 2000);
+  byId("digitOffset").value = offset;
+  byId("digitLength").value = length;
+  byId("digitDisplay").textContent = digits.slice(offset, offset + length);
+}
+function renderLetters() {
+  const offset = clamp(byId("letterOffset").value, 0, letters.length);
+  const length = clamp(byId("letterLength").value, 1, 2000);
+  byId("letterOffset").value = offset;
+  byId("letterLength").value = length;
+  byId("letterDisplay").textContent = letters.slice(offset, offset + length);
+}
+function addHistory(kind, query) {
+  const key = "piHistory:" + kind;
+  let items = [];
+  try { items = JSON.parse(localStorage.getItem(key) || "[]"); } catch (error) { console.warn("Could not read search history:", error); }
+  items = [query, ...items.filter(item => item !== query)].slice(0, 10);
+  try { localStorage.setItem(key, JSON.stringify(items)); } catch (error) { console.warn("Could not save search history:", error); }
+  renderHistory(kind, items);
+}
+function renderHistory(kind, items) {
+  const container = byId(kind + "History");
+  container.replaceChildren();
+  if (!items.length) return;
+  const label = document.createElement("span");
+  label.className = "muted";
+  label.textContent = "Recent:";
+  container.append(label);
+  for (const item of items) {
+    const button = document.createElement("button");
+    button.className = "chip";
+    button.textContent = item;
+    button.addEventListener("click", () => {
+      byId(kind === "digit" ? "digitQuery" : "letterQuery").value = item;
+      search(kind);
+    });
+    container.append(button);
+  }
+}
+function search(kind, value) {
+  const input = byId(kind === "digit" ? "digitQuery" : "letterQuery");
+  const resultId = kind === "digit" ? "digitResult" : "letterResult";
+  const contextId = kind === "digit" ? "digitContext" : "letterContext";
+  const source = kind === "digit" ? digits : letters;
+  const query = (value === undefined ? input.value : value).trim().toUpperCase();
+  if (!(kind === "digit" ? /^[0-9]+$/.test(query) : /^[A-Z]+$/.test(query))) {
+    showResult(resultId, kind === "digit" ? "Enter digits 0–9." : "Enter letters A–Z.", true);
+    return;
+  }
+  if (query.length > (kind === "digit" ? 200 : 100)) {
+    showResult(resultId, "Search text is too long.", true);
+    return;
+  }
+  const offset = source.indexOf(query);
+  byId(contextId).hidden = true;
+  if (offset < 0) {
+    showResult(resultId, `Not found in the ${format(source.length)} available ${kind === "digit" ? "digits" : "letters"}.`, true);
+    return;
+  }
+  showResult(resultId, `Found at ${kind === "digit" ? "digit" : "letter"} offset ${format(offset)} (position ${format(offset + 1)}).`);
+  renderContext(contextId, source, offset, query);
+  addHistory(kind, query);
+}
+function setView(name) {
+  document.querySelectorAll("main > section").forEach(section => section.classList.toggle("active", section.id === name));
+  document.querySelectorAll("nav button").forEach(button => button.classList.toggle("active", button.dataset.view === name));
+  if (location.hash !== "#" + name) history.replaceState(null, "", "#" + name);
+}
+function drawImage(offset, width, height, mode) {
+  offset = clamp(offset, 0, DIGIT_COUNT - 1);
+  width = clamp(width, 1, 40);
+  height = clamp(height, 1, 40);
+  const canvas = byId("imageCanvas");
+  const ctx = canvas.getContext("2d");
+  canvas.width = width * 12;
+  canvas.height = height * 12;
+  for (let i = 0; i < width * height; i++) {
+    const digit = Number(digits[offset + i] || 0);
+    const gray = Math.round(digit / 9 * 255);
+    ctx.fillStyle = mode === "grayscale" ? `rgb(${gray},${gray},${gray})` : colors[digit];
+    ctx.fillRect((i % width) * 12, Math.floor(i / width) * 12, 12, 12);
+  }
+}
+function nearestDigit(r, g, b) {
+  let best = 0, bestDistance = Infinity;
+  for (let digit = 0; digit < colors.length; digit++) {
+    const hex = colors[digit].slice(1);
+    const pr = parseInt(hex.slice(0, 2), 16), pg = parseInt(hex.slice(2, 4), 16), pb = parseInt(hex.slice(4, 6), 16);
+    const distance = (r - pr) ** 2 + (g - pg) ** 2 + (b - pb) ** 2;
+    if (distance < bestDistance) { bestDistance = distance; best = digit; }
+  }
+  return best;
+}
+
+document.querySelectorAll("nav button").forEach(button => button.addEventListener("click", () => setView(button.dataset.view)));
+byId("searchDigits").addEventListener("click", () => search("digit"));
+byId("searchLetters").addEventListener("click", () => search("letter"));
+byId("digitQuery").addEventListener("keydown", event => { if (event.key === "Enter") search("digit"); });
+byId("letterQuery").addEventListener("keydown", event => { if (event.key === "Enter") search("letter"); });
+byId("browseDigits").addEventListener("click", renderDigits);
+byId("browseLetters").addEventListener("click", renderLetters);
+byId("randomDigits").addEventListener("click", () => { byId("digitOffset").value = Math.floor(Math.random() * DIGIT_COUNT); renderDigits(); });
+byId("randomLetters").addEventListener("click", () => { byId("letterOffset").value = Math.floor(Math.random() * letters.length); renderLetters(); });
+byId("copyDigits").addEventListener("click", () => navigator.clipboard.writeText(byId("digitDisplay").textContent));
+byId("copyLetters").addEventListener("click", () => navigator.clipboard.writeText(byId("letterDisplay").textContent));
+byId("renderImage").addEventListener("click", () => drawImage(byId("imageOffset").value, byId("imageWidth").value, byId("imageHeight").value, byId("imageMode").value));
+byId("imageFile").addEventListener("change", event => { imageFile = event.target.files[0] || null; });
+byId("searchImage").addEventListener("click", async () => {
+  if (!imageFile) { showResult("imageResult", "Choose an image first.", true); return; }
+  try {
+    const width = clamp(byId("searchWidth").value, 2, 12);
+    const height = clamp(byId("searchHeight").value, 2, 12);
+    const image = await createImageBitmap(imageFile);
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
+    ctx.drawImage(image, 0, 0, width, height);
+    const pixels = ctx.getImageData(0, 0, width, height).data;
+    let pattern = "";
+    for (let i = 0; i < width * height; i++) pattern += nearestDigit(pixels[i * 4], pixels[i * 4 + 1], pixels[i * 4 + 2]);
+    const offset = digits.indexOf(pattern);
+    showResult("imageResult", offset < 0 ? "That color pattern was not found in the million-digit set." : `Nearest color pattern found at digit ${format(offset)}.`);
+    if (offset >= 0) {
+      byId("imageOffset").value = offset;
+      drawImage(offset, width, height, byId("imageMode").value);
+    }
+    image.close();
+  } catch (error) {
+    showError("imageResult", error);
+  }
+});
+
+const landmarks = [{ label: "Feynman point", query: "999999" }, { label: "Ascending run", query: "123456789" }, { label: "First 10 digits", query: "3141592653" }];
+for (const item of landmarks) {
+  const button = document.createElement("button");
+  button.className = "chip";
+  button.textContent = item.label;
+  button.addEventListener("click", () => { byId("digitQuery").value = item.query; search("digit"); });
+  byId("landmarks").append(button);
+}
+for (const [label, make] of [["MMDDYYYY", (m,d,y) => m+d+y], ["DDMMYYYY", (m,d,y) => d+m+y], ["YYYYMMDD", (m,d,y) => y+m+d]]) {
+  const button = document.createElement("button");
+  button.className = "chip";
+  button.textContent = label;
+  button.title = "Search this date format";
+  button.addEventListener("click", () => {
+    const month = byId("dateMonth").value;
+    const day = byId("dateDay").value;
+    const year = byId("dateYear").value;
+    if (!month || !day || !year || Number(month) > 12 || Number(day) > 31) {
+      showResult("digitResult", "Enter a valid month, day, and year first.", true);
+      return;
+    }
+    const query = make(month.padStart(2, "0"), day.padStart(2, "0"), year.padStart(4, "0"));
+    byId("digitQuery").value = query;
+    search("digit");
+  });
+  byId("dateFormats").append(button);
+}
+colors.forEach((hex, digit) => {
+  const swatch = document.createElement("span");
+  swatch.className = "swatch";
+  swatch.innerHTML = `<span class="dot" style="background:${hex}"></span>${digit} = ${colorNames[digit]}`;
+  byId("palette").append(swatch);
+});
+
+async function boot() {
+  try {
+    const response = await fetch("data/pi-digits.txt", { cache: "no-cache" });
+    if (!response.ok) throw new Error(`Could not load the digit file (HTTP ${response.status}). Re-run build.bat and push.bat.`);
+    digits = (await response.text()).trim();
+    if (!/^[0-9]+$/.test(digits) || digits.length !== DIGIT_COUNT) {
+      throw new Error(`The digit file must contain exactly ${format(DIGIT_COUNT)} digits; found ${format(digits.length)}.`);
+    }
+    letters = makeLetters(digits);
+    byId("loadStatus").textContent = `Ready: ${format(digits.length)} digits and ${format(letters.length)} letters.`;
+    byId("aboutCount").textContent = `Loaded ${format(digits.length)} digits of pi (${format(letters.length)} decoded letters).`;
+    renderDigits();
+    renderLetters();
+    drawImage(0, 20, 20, "color");
+    for (const kind of ["digit", "letter"]) {
+      let items = [];
+      try { items = JSON.parse(localStorage.getItem("piHistory:" + kind) || "[]"); } catch (error) { console.warn("Could not read search history:", error); }
+      renderHistory(kind, items);
+    }
+  } catch (error) {
+    byId("loadStatus").classList.add("error");
+    byId("loadStatus").textContent = error.message;
+  }
+  const requestedView = location.hash.slice(1);
+  if (["digits", "letters", "image", "about"].includes(requestedView)) setView(requestedView);
+}
+boot();
+</script>
+</body>
+</html>

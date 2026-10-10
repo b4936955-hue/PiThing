@@ -1,0 +1,18 @@
+{
+  "name": "pi-library",
+  "version": "1.0.0",
+  "description": "Search, browse, and view pi as digits, letters, colors, and grayscale",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "download-pi": "node scripts/download-pi.js",
+    "build-index": "node scripts/build-index.js",
+    "build:github": "node scripts/build-github.js",
+    "gen-test-digits": "node scripts/gen-test-digits.js"
+  },
+  "dependencies": {
+    "express": "^5.2.1",
+    "multer": "^2.3.0",
+    "sharp": "^0.33.5"
+  }
+}
