@@ -23,10 +23,10 @@
       var branches = ["master", "main"];
       var sources = [];
       branches.forEach(function (branch) {
-        sources.push("https://cdn.jsdelivr.net/gh/" + USER + "/" + REPO + "@" + branch + "/");
         sources.push("https://raw.githubusercontent.com/" + USER + "/" + REPO + "/" + branch + "/");
-        sources.push("https://cdn.jsdelivr.net/gh/" + USER + "/" + REPO + "@" + branch + "/docs/");
+        sources.push("https://cdn.jsdelivr.net/gh/" + USER + "/" + REPO + "@" + branch + "/");
         sources.push("https://raw.githubusercontent.com/" + USER + "/" + REPO + "/" + branch + "/docs/");
+        sources.push("https://cdn.jsdelivr.net/gh/" + USER + "/" + REPO + "@" + branch + "/docs/");
       });
       var status = document.getElementById("status");
       var failures = [];
@@ -39,8 +39,11 @@
             continue;
           }
           var html = await response.text();
-          if (html.indexOf("The Library of Pi") < 0 || html.indexOf("pi-index-meta.json") < 0) {
-            failures.push(sources[i] + " did not contain the packed-index build");
+          if (html.indexOf("The Library of Pi") < 0 ||
+              html.indexOf("pi-index-meta.json") < 0 ||
+              html.indexOf('name="pi-search-engine" content="parallel-v2"') < 0 ||
+              html.indexOf("search-worker.js") < 0) {
+            failures.push(sources[i] + " did not contain the current parallel-search build");
             continue;
           }
           var base = "<base href=\"" + sources[i] + "\">";

@@ -3,6 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="pi-search-engine" content="parallel-v2">
   <title>The Library of Pi</title>
   <style>
     :root { color-scheme: dark; font: 15px Arial, sans-serif; background: #09090b; color: #eee; }
@@ -258,7 +259,7 @@ function renderHistory(kind, items) {
 }
 async function findMatch(kind, query) {
   if (!searchWorkerUrlPromise) {
-    searchWorkerUrlPromise = fetch(new URL("search-worker.js", document.baseURI))
+    searchWorkerUrlPromise = fetch(new URL("search-worker.js?v=parallel-v2", document.baseURI), { cache: "no-store" })
       .then(response => {
         if (!response.ok) throw new Error(`Could not load the parallel search worker (HTTP ${response.status}).`);
         return response.text();
