@@ -4,80 +4,118 @@ const fs = require("fs");
 const path = require("path");
 
 const ROOT = path.join(__dirname, "..");
-const DIGIT_COUNT = 1_000_000;
-const BLOCK_DIGITS = 9;
-const BLOCK_BYTES = 4;
-const outputDir = path.join(ROOT, "docs");
-const outputDataDir = path.join(outputDir, "data");
-const outputDigits = path.join(outputDataDir, "pi-digits.txt");
-const rootDataDir = path.join(ROOT, "data");
+const DIGIT_COUNT = 1_000_000_000;
+const CHUNK_DIGIT_COUNT = 9_000_000;
+const DIGITS_PER_BLOCK = 9;
+const BYTES_PER_BLOCK = 4;
+const SOURCE_PATH = path.join(ROOT, "data", "pi-digits.bin");
+const ROOT_DATA_DIR = path.join(ROOT, "data");
+const DOCS_DIR = path.join(ROOT, "docs");
+const ROOT_META_PATH = path.join(ROOT_DATA_DIR, "pi-billion-meta.json");
+const DOCS_DATA_DIR = path.join(DOCS_DIR, "data");
 
-function writeFromPackedFile(filePath) {
-    const fd = fs.openSync(filePath, "r");
-    const digits = Buffer.alloc(DIGIT_COUNT);
-    let written = 0;
-
-    try {
-        const blocks = Math.ceil(DIGIT_COUNT / BLOCK_DIGITS);
-        const packed = Buffer.alloc(blocks * BLOCK_BYTES);
-        const bytesRead = fs.readSync(fd, packed, 0, packed.length, 0);
-        if (bytesRead !== packed.length) {
-            throw new Error(`Packed digit file is too short: ${filePath}`);
-        }
-
-        for (let block = 0; block < blocks; block++) {
-            const value = packed.readUInt32LE(block * BLOCK_BYTES);
-            const chunk = String(value).padStart(BLOCK_DIGITS, "0");
-            const count = Math.min(BLOCK_DIGITS, DIGIT_COUNT - written);
-            digits.write(chunk.slice(0, count), written, count, "ascii");
-            written += count;
-        }
-    } finally {
-        fs.closeSync(fd);
+function writeIfChanged(filePath, contents) {
+    const buffer = Buffer.isBuffer(contents) ? contents : Buffer.from(contents);
+    if (fs.existsSync(filePath) && fs.statSync(filePath).size === buffer.length) {
+        const current = fs.readFileSync(filePath);
+        if (current.equals(buffer)) return;
     }
-
-    fs.writeFileSync(outputDigits, digits);
+    fs.writeFileSync(filePath, buffer);
 }
 
-function writeFromTextFile(filePath) {
-    const input = fs.readFileSync(filePath, "utf8");
-    const digits = input.replace(/[^0-9]/g, "").slice(0, DIGIT_COUNT);
-    if (digits.length !== DIGIT_COUNT) {
-        throw new Error(`Expected at least ${DIGIT_COUNT} digits in ${filePath}; found ${digits.length}.`);
+function writePackedChunks() {
+    const requiredBytes = Math.ceil(DIGIT_COUNT / DIGITS_PER_BLOCK) * BYTES_PER_BLOCK;
+    const sourceSize = fs.statSync(SOURCE_PATH).size;
+    if (sourceSize < requiredBytes) {
+        throw new Error(
+            `Packed pi source is too short: expected at least ${requiredBytes} bytes, found ${sourceSize}.`
+        );
     }
-    fs.writeFileSync(outputDigits, digits);
+
+    const chunkCount = Math.ceil(DIGIT_COUNT / CHUNK_DIGIT_COUNT);
+    const sourceFd = fs.openSync(SOURCE_PATH, "r");
+    try {
+        for (let index = 0; index < chunkCount; index++) {
+            const firstDigit = index * CHUNK_DIGIT_COUNT;
+            const digitCount = Math.min(CHUNK_DIGIT_COUNT, DIGIT_COUNT - firstDigit);
+            const byteCount = Math.ceil(digitCount / DIGITS_PER_BLOCK) * BYTES_PER_BLOCK;
+            const packed = Buffer.alloc(byteCount);
+            let bytesRead = 0;
+
+            while (bytesRead < byteCount) {
+                const count = fs.readSync(
+                    sourceFd,
+                    packed,
+                    bytesRead,
+                    byteCount - bytesRead,
+                    firstDigit / DIGITS_PER_BLOCK * BYTES_PER_BLOCK + bytesRead
+                );
+                if (count === 0) throw new Error(`Unexpected end of packed pi data at chunk ${index}.`);
+                bytesRead += count;
+            }
+
+            const name = `pi-billion-${String(index).padStart(3, "0")}.bin`;
+            writeIfChanged(path.join(ROOT_DATA_DIR, name), packed);
+            writeIfChanged(path.join(DOCS_DATA_DIR, name), packed);
+            console.log(`Wrote ${name} (${digitCount.toLocaleString()} digits).`);
+        }
+    } finally {
+        fs.closeSync(sourceFd);
+    }
+
+    return {
+        digitCount: DIGIT_COUNT,
+        chunkDigitCount: CHUNK_DIGIT_COUNT,
+        chunkCount,
+        format: "packed9-le",
+        pattern: "pi-billion-{index}.bin"
+    };
+}
+
+function copyExistingChunks() {
+    const chunkCount = Math.ceil(DIGIT_COUNT / CHUNK_DIGIT_COUNT);
+    for (let index = 0; index < chunkCount; index++) {
+        const digitCount = Math.min(CHUNK_DIGIT_COUNT, DIGIT_COUNT - index * CHUNK_DIGIT_COUNT);
+        const expectedBytes = Math.ceil(digitCount / DIGITS_PER_BLOCK) * BYTES_PER_BLOCK;
+        const name = `pi-billion-${String(index).padStart(3, "0")}.bin`;
+        const sourcePath = path.join(ROOT_DATA_DIR, name);
+        if (!fs.existsSync(sourcePath) || fs.statSync(sourcePath).size !== expectedBytes) {
+            throw new Error(
+                `Missing packed source ${sourcePath}. Restore data/pi-digits.bin or all checked-in pi-billion chunks.`
+            );
+        }
+        fs.copyFileSync(sourcePath, path.join(DOCS_DATA_DIR, name));
+    }
+
+    return {
+        digitCount: DIGIT_COUNT,
+        chunkDigitCount: CHUNK_DIGIT_COUNT,
+        chunkCount,
+        format: "packed9-le",
+        pattern: "pi-billion-{index}.bin"
+    };
 }
 
 function main() {
-    const packedPath = path.join(ROOT, "data", "pi-digits.bin");
-    const textSources = [
-        path.join(ROOT, "data", "pi-raw.txt"),
-        path.join(ROOT, "data", "pi-digits.txt"),
-        outputDigits
-    ];
+    fs.mkdirSync(ROOT_DATA_DIR, { recursive: true });
+    fs.mkdirSync(DOCS_DATA_DIR, { recursive: true });
+    const metadata = fs.existsSync(SOURCE_PATH) ? writePackedChunks() : copyExistingChunks();
+    const serializedMetadata = JSON.stringify(metadata, null, 2);
+    writeIfChanged(ROOT_META_PATH, serializedMetadata);
+    writeIfChanged(path.join(DOCS_DATA_DIR, "pi-billion-meta.json"), serializedMetadata);
 
-    fs.mkdirSync(outputDataDir, { recursive: true });
+    const page = fs.readFileSync(path.join(ROOT, "github", "index.html"));
+    writeIfChanged(path.join(DOCS_DIR, "index.html"), page);
+    writeIfChanged(path.join(ROOT, "index.html"), page);
 
-    if (fs.existsSync(packedPath)) {
-        writeFromPackedFile(packedPath);
-    } else {
-        const textSource = textSources.find(fs.existsSync);
-        if (!textSource) {
-            throw new Error(
-                "No pi digit source found. Add data/pi-digits.bin or data/pi-raw.txt, " +
-                "or run this build from a clone that already contains docs/data/pi-digits.txt."
-            );
-        }
-        writeFromTextFile(textSource);
+    for (const oldDigitsPath of [
+        path.join(ROOT_DATA_DIR, "pi-digits.txt"),
+        path.join(DOCS_DATA_DIR, "pi-digits.txt")
+    ]) {
+        if (fs.existsSync(oldDigitsPath)) fs.unlinkSync(oldDigitsPath);
     }
 
-    fs.copyFileSync(path.join(ROOT, "github", "index.html"), path.join(outputDir, "index.html"));
-    fs.mkdirSync(rootDataDir, { recursive: true });
-    fs.copyFileSync(path.join(ROOT, "github", "index.html"), path.join(ROOT, "index.html"));
-    fs.copyFileSync(outputDigits, path.join(rootDataDir, "pi-digits.txt"));
-    console.log(`GitHub Pages site built in ${path.relative(ROOT, outputDir)}.`);
-    console.log(`Included exactly ${DIGIT_COUNT.toLocaleString()} digits in ${path.relative(ROOT, outputDigits)}.`);
-    console.log(`Root GitHub site built in ${path.relative(ROOT, "index.html")}.`);
+    console.log(`GitHub site built with ${DIGIT_COUNT.toLocaleString()} digits in ${metadata.chunkCount} packed chunks.`);
 }
 
 try {

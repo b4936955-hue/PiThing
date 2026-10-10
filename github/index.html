@@ -49,12 +49,12 @@
       <button data-view="about">About</button>
     </nav>
   </header>
-  <p id="loadStatus">Loading the million-digit library…</p>
+  <p id="loadStatus">Loading the billion-digit library…</p>
 
   <section id="digits" class="active">
     <div class="card">
       <h2>Search for digits</h2>
-      <p>Find a digit sequence in the first million digits of pi.</p>
+      <p>Find a digit sequence in one billion digits of pi.</p>
       <div class="row"><input id="digitQuery" type="text" inputmode="numeric" maxlength="200" placeholder="e.g. 314159"><button class="primary" id="searchDigits">Search</button></div>
       <div id="digitResult" class="result" aria-live="polite"></div>
       <div id="digitContext" class="digits" hidden></div>
@@ -65,11 +65,11 @@
         <label for="dateYear">Year</label><input id="dateYear" type="number" min="1" max="9999" placeholder="YYYY">
       </div>
       <div class="chips" id="dateFormats"></div>
-      <div class="chips" id="history"></div>
+      <div class="chips" id="digitHistory"></div>
     </div>
     <div class="card">
       <h2>Browse digits</h2>
-      <p>Offset zero is the leading 3. The dataset includes one million digits total.</p>
+      <p>Offset zero is the leading 3. The packed source is downloaded one chunk at a time.</p>
       <div class="row"><label for="digitOffset">Offset</label><input id="digitOffset" type="number" min="0" value="0"><label for="digitLength">Length</label><input id="digitLength" type="number" min="1" max="2000" value="120"><button class="primary" id="browseDigits">Browse</button><button class="secondary" id="randomDigits">Random</button><button class="secondary" id="copyDigits">Copy</button></div>
       <div id="digitDisplay" class="digits"></div>
     </div>
@@ -105,20 +105,21 @@
   <section id="about">
     <div class="card">
       <h2>About this build</h2>
-      <p id="aboutCount">A million digits of pi, bundled with this GitHub Pages site.</p>
-      <p>All browsing and searches run in your browser. The static GitHub-hosted version does not require a server or send your searches anywhere.</p>
+      <p id="aboutCount">One billion digits of pi, stored in packed chunks.</p>
+      <p>Browsing downloads only the chunks it needs. Searches scan the packed dataset in your browser without a server.</p>
       <div class="palette" id="palette"></div>
     </div>
   </section>
 </main>
 <script>
 "use strict";
-const DIGIT_COUNT = 1_000_000;
 const CONTEXT = 40;
 const colors = ["#000000", "#ff8c00", "#1fa64a", "#e8112d", "#8a2be2", "#8b5a2b", "#ff69b4", "#808080", "#90ee90", "#1f75fe"];
 const colorNames = ["black", "orange", "green", "red", "purple", "brown", "pink", "gray", "light green", "blue"];
-let digits = "";
-let letters = "";
+let digitCount = 0;
+let chunkDigitCount = 0;
+let chunkCount = 0;
+const chunkCache = new Map();
 let imageFile = null;
 
 const byId = id => document.getElementById(id);
@@ -140,6 +141,61 @@ function makeLetters(source) {
   for (let i = 0; i + 1 < source.length; i += 2) result += letterFor(source.slice(i, i + 2));
   return result;
 }
+function chunkName(index) { return `pi-billion-${String(index).padStart(3, "0")}.bin`; }
+function expectedChunkDigits(index) { return Math.min(chunkDigitCount, digitCount - index * chunkDigitCount); }
+async function getChunk(index) {
+  if (chunkCache.has(index)) {
+    const cached = chunkCache.get(index);
+    chunkCache.delete(index);
+    chunkCache.set(index, cached);
+    return cached;
+  }
+  if (index < 0 || index >= chunkCount) return "";
+  const response = await fetch(`data/${chunkName(index)}`);
+  if (!response.ok) throw new Error(`Could not load packed digit chunk ${index + 1} (HTTP ${response.status}).`);
+  const packed = new DataView(await response.arrayBuffer());
+  const count = expectedChunkDigits(index);
+  const expectedBytes = Math.ceil(count / 9) * 4;
+  if (packed.byteLength !== expectedBytes) {
+    throw new Error(`Packed digit chunk ${index + 1} has ${packed.byteLength} bytes; expected ${expectedBytes}.`);
+  }
+  const decoded = new Uint8Array(count);
+  const blockDigits = new Uint8Array(9);
+  for (let block = 0, digitOffset = 0; digitOffset < count; block++, digitOffset += 9) {
+    let value = packed.getUint32(block * 4, true);
+    for (let index = 8; index >= 0; index--) {
+      blockDigits[index] = 48 + (value % 10);
+      value = Math.floor(value / 10);
+    }
+    decoded.set(blockDigits.subarray(0, Math.min(9, count - digitOffset)), digitOffset);
+  }
+  const pieces = [];
+  for (let offset = 0; offset < decoded.length; offset += 0x8000) {
+    pieces.push(String.fromCharCode(...decoded.subarray(offset, offset + 0x8000)));
+  }
+  const digits = pieces.join("");
+  chunkCache.set(index, digits);
+  if (chunkCache.size > 2) chunkCache.delete(chunkCache.keys().next().value);
+  return digits;
+}
+async function getDigitsAt(offset, length) {
+  const start = clamp(offset, 0, digitCount);
+  const end = Math.min(digitCount, start + Math.max(0, Math.floor(length)));
+  let result = "";
+  for (let position = start; position < end;) {
+    const chunkIndex = Math.floor(position / chunkDigitCount);
+    const chunk = await getChunk(chunkIndex);
+    const withinChunk = position - chunkIndex * chunkDigitCount;
+    const take = Math.min(end - position, chunk.length - withinChunk);
+    if (take <= 0) throw new Error(`Digit chunk ${chunkIndex + 1} ended before the requested offset.`);
+    result += chunk.slice(withinChunk, withinChunk + take);
+    position += take;
+  }
+  return result;
+}
+async function getLettersAt(offset, length) {
+  return makeLetters(await getDigitsAt(offset * 2, length * 2));
+}
 function renderContext(id, text, offset, query) {
   const start = Math.max(0, offset - CONTEXT);
   const before = text.slice(start, offset);
@@ -149,19 +205,27 @@ function renderContext(id, text, offset, query) {
   el.replaceChildren(document.createTextNode(before), Object.assign(document.createElement("mark"), { textContent: match }), document.createTextNode(after));
   el.hidden = false;
 }
-function renderDigits() {
-  const offset = clamp(byId("digitOffset").value, 0, DIGIT_COUNT - 1);
+async function renderDigits() {
+  const offset = clamp(byId("digitOffset").value, 0, digitCount - 1);
   const length = clamp(byId("digitLength").value, 1, 2000);
   byId("digitOffset").value = offset;
   byId("digitLength").value = length;
-  byId("digitDisplay").textContent = digits.slice(offset, offset + length);
+  try {
+    byId("digitDisplay").textContent = await getDigitsAt(offset, length);
+  } catch (error) {
+    showError("digitResult", error);
+  }
 }
-function renderLetters() {
-  const offset = clamp(byId("letterOffset").value, 0, letters.length);
+async function renderLetters() {
+  const offset = clamp(byId("letterOffset").value, 0, Math.floor(digitCount / 2));
   const length = clamp(byId("letterLength").value, 1, 2000);
   byId("letterOffset").value = offset;
   byId("letterLength").value = length;
-  byId("letterDisplay").textContent = letters.slice(offset, offset + length);
+  try {
+    byId("letterDisplay").textContent = await getLettersAt(offset, length);
+  } catch (error) {
+    showError("letterResult", error);
+  }
 }
 function addHistory(kind, query) {
   const key = "piHistory:" + kind;
@@ -190,11 +254,26 @@ function renderHistory(kind, items) {
     container.append(button);
   }
 }
-function search(kind, value) {
+async function findMatch(kind, query) {
+  let carry = "";
+  for (let index = 0; index < chunkCount; index++) {
+    byId("loadStatus").textContent = `Searching ${format(Math.min((index + 1) * chunkDigitCount, digitCount))} of ${format(digitCount)} digits…`;
+    const chunk = await getChunk(index);
+    const segment = kind === "digit" ? chunk : makeLetters(chunk);
+    const combined = carry + segment;
+    const matchIndex = combined.indexOf(query);
+    if (matchIndex >= 0) {
+      const unitsPerChunk = kind === "digit" ? chunkDigitCount : chunkDigitCount / 2;
+      return index * unitsPerChunk - carry.length + matchIndex;
+    }
+    carry = combined.slice(Math.max(0, combined.length - query.length + 1));
+  }
+  return -1;
+}
+async function search(kind, value) {
   const input = byId(kind === "digit" ? "digitQuery" : "letterQuery");
   const resultId = kind === "digit" ? "digitResult" : "letterResult";
   const contextId = kind === "digit" ? "digitContext" : "letterContext";
-  const source = kind === "digit" ? digits : letters;
   const query = (value === undefined ? input.value : value).trim().toUpperCase();
   if (!(kind === "digit" ? /^[0-9]+$/.test(query) : /^[A-Z]+$/.test(query))) {
     showResult(resultId, kind === "digit" ? "Enter digits 0–9." : "Enter letters A–Z.", true);
@@ -204,14 +283,35 @@ function search(kind, value) {
     showResult(resultId, "Search text is too long.", true);
     return;
   }
-  const offset = source.indexOf(query);
+  let offset;
+  try {
+    offset = await findMatch(kind, query);
+  } catch (error) {
+    showError(resultId, error);
+    byId("loadStatus").textContent = "Search could not be completed.";
+    return;
+  }
   byId(contextId).hidden = true;
   if (offset < 0) {
-    showResult(resultId, `Not found in the ${format(source.length)} available ${kind === "digit" ? "digits" : "letters"}.`, true);
+    showResult(resultId, `Not found in the ${format(kind === "digit" ? digitCount : Math.floor(digitCount / 2))} available ${kind === "digit" ? "digits" : "letters"}.`, true);
+    byId("loadStatus").textContent = `Search complete: scanned ${format(digitCount)} digits.`;
     return;
   }
   showResult(resultId, `Found at ${kind === "digit" ? "digit" : "letter"} offset ${format(offset)} (position ${format(offset + 1)}).`);
-  renderContext(contextId, source, offset, query);
+  const contextStart = Math.max(0, offset - CONTEXT);
+  const beforeLength = offset - contextStart;
+  let context;
+  try {
+    context = kind === "digit"
+      ? await getDigitsAt(contextStart, beforeLength + query.length + CONTEXT)
+      : await getLettersAt(contextStart, beforeLength + query.length + CONTEXT);
+  } catch (error) {
+    showError(resultId, error);
+    byId("loadStatus").textContent = "Could not load match context.";
+    return;
+  }
+  renderContext(contextId, context, beforeLength, query);
+  byId("loadStatus").textContent = `Ready: ${format(digitCount)} digits and ${format(Math.floor(digitCount / 2))} letters.`;
   addHistory(kind, query);
 }
 function setView(name) {
@@ -219,16 +319,17 @@ function setView(name) {
   document.querySelectorAll("nav button").forEach(button => button.classList.toggle("active", button.dataset.view === name));
   if (location.hash !== "#" + name) history.replaceState(null, "", "#" + name);
 }
-function drawImage(offset, width, height, mode) {
-  offset = clamp(offset, 0, DIGIT_COUNT - 1);
+async function drawImage(offset, width, height, mode) {
+  offset = clamp(offset, 0, digitCount - 1);
   width = clamp(width, 1, 40);
   height = clamp(height, 1, 40);
   const canvas = byId("imageCanvas");
   const ctx = canvas.getContext("2d");
+  const imageDigits = await getDigitsAt(offset, width * height);
   canvas.width = width * 12;
   canvas.height = height * 12;
   for (let i = 0; i < width * height; i++) {
-    const digit = Number(digits[offset + i] || 0);
+    const digit = Number(imageDigits[i] || 0);
     const gray = Math.round(digit / 9 * 255);
     ctx.fillStyle = mode === "grayscale" ? `rgb(${gray},${gray},${gray})` : colors[digit];
     ctx.fillRect((i % width) * 12, Math.floor(i / width) * 12, 12, 12);
@@ -252,11 +353,11 @@ byId("digitQuery").addEventListener("keydown", event => { if (event.key === "Ent
 byId("letterQuery").addEventListener("keydown", event => { if (event.key === "Enter") search("letter"); });
 byId("browseDigits").addEventListener("click", renderDigits);
 byId("browseLetters").addEventListener("click", renderLetters);
-byId("randomDigits").addEventListener("click", () => { byId("digitOffset").value = Math.floor(Math.random() * DIGIT_COUNT); renderDigits(); });
-byId("randomLetters").addEventListener("click", () => { byId("letterOffset").value = Math.floor(Math.random() * letters.length); renderLetters(); });
+byId("randomDigits").addEventListener("click", () => { byId("digitOffset").value = Math.floor(Math.random() * digitCount); renderDigits(); });
+byId("randomLetters").addEventListener("click", () => { byId("letterOffset").value = Math.floor(Math.random() * Math.floor(digitCount / 2)); renderLetters(); });
 byId("copyDigits").addEventListener("click", () => navigator.clipboard.writeText(byId("digitDisplay").textContent));
 byId("copyLetters").addEventListener("click", () => navigator.clipboard.writeText(byId("letterDisplay").textContent));
-byId("renderImage").addEventListener("click", () => drawImage(byId("imageOffset").value, byId("imageWidth").value, byId("imageHeight").value, byId("imageMode").value));
+byId("renderImage").addEventListener("click", () => drawImage(byId("imageOffset").value, byId("imageWidth").value, byId("imageHeight").value, byId("imageMode").value).catch(error => showError("imageResult", error)));
 byId("imageFile").addEventListener("change", event => { imageFile = event.target.files[0] || null; });
 byId("searchImage").addEventListener("click", async () => {
   if (!imageFile) { showResult("imageResult", "Choose an image first.", true); return; }
@@ -272,11 +373,11 @@ byId("searchImage").addEventListener("click", async () => {
     const pixels = ctx.getImageData(0, 0, width, height).data;
     let pattern = "";
     for (let i = 0; i < width * height; i++) pattern += nearestDigit(pixels[i * 4], pixels[i * 4 + 1], pixels[i * 4 + 2]);
-    const offset = digits.indexOf(pattern);
-    showResult("imageResult", offset < 0 ? "That color pattern was not found in the million-digit set." : `Nearest color pattern found at digit ${format(offset)}.`);
+    const offset = await findMatch("digit", pattern);
+    showResult("imageResult", offset < 0 ? "That color pattern was not found in the billion-digit set." : `Nearest color pattern found at digit ${format(offset)}.`);
     if (offset >= 0) {
       byId("imageOffset").value = offset;
-      drawImage(offset, width, height, byId("imageMode").value);
+      await drawImage(offset, width, height, byId("imageMode").value);
     }
     image.close();
   } catch (error) {
@@ -320,18 +421,25 @@ colors.forEach((hex, digit) => {
 
 async function boot() {
   try {
-    const response = await fetch("data/pi-digits.txt", { cache: "no-cache" });
-    if (!response.ok) throw new Error(`Could not load the digit file (HTTP ${response.status}). Re-run build.bat and push.bat.`);
-    digits = (await response.text()).trim();
-    if (!/^[0-9]+$/.test(digits) || digits.length !== DIGIT_COUNT) {
-      throw new Error(`The digit file must contain exactly ${format(DIGIT_COUNT)} digits; found ${format(digits.length)}.`);
+    const response = await fetch("data/pi-billion-meta.json");
+    if (!response.ok) throw new Error(`Could not load the digit metadata (HTTP ${response.status}). Re-run build.bat and push.bat.`);
+    const metadata = await response.json();
+    if (metadata.format !== "packed9-le" || !Number.isSafeInteger(metadata.digitCount) ||
+        !Number.isSafeInteger(metadata.chunkDigitCount) || !Number.isSafeInteger(metadata.chunkCount)) {
+      throw new Error("The packed pi metadata is invalid or uses an unsupported format.");
     }
-    letters = makeLetters(digits);
-    byId("loadStatus").textContent = `Ready: ${format(digits.length)} digits and ${format(letters.length)} letters.`;
-    byId("aboutCount").textContent = `Loaded ${format(digits.length)} digits of pi (${format(letters.length)} decoded letters).`;
-    renderDigits();
-    renderLetters();
-    drawImage(0, 20, 20, "color");
+    digitCount = metadata.digitCount;
+    chunkDigitCount = metadata.chunkDigitCount;
+    chunkCount = metadata.chunkCount;
+    if (digitCount !== 1_000_000_000 || chunkCount !== Math.ceil(digitCount / chunkDigitCount)) {
+      throw new Error("The deployed pi index does not contain the expected one billion digits.");
+    }
+    await getChunk(0);
+    byId("loadStatus").textContent = `Ready: ${format(digitCount)} digits and ${format(Math.floor(digitCount / 2))} letters. Chunks load as needed.`;
+    byId("aboutCount").textContent = `Loaded a ${format(digitCount)}-digit packed pi index (${format(Math.floor(digitCount / 2))} decoded letters).`;
+    await renderDigits();
+    await renderLetters();
+    await drawImage(0, 20, 20, "color");
     for (const kind of ["digit", "letter"]) {
       let items = [];
       try { items = JSON.parse(localStorage.getItem("piHistory:" + kind) || "[]"); } catch (error) { console.warn("Could not read search history:", error); }
