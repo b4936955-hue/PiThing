@@ -62,7 +62,7 @@
       <button data-view="settings">Settings</button>
     </nav>
   </header>
-  <div class="row"><p id="loadStatus">Loading the pi digit library…</p><button class="secondary" id="cancelSearch" type="button" hidden>Cancel search</button></div>
+  <div class="row"><p id="loadStatus">Loading the pi digit library…</p><button class="secondary" id="cancelSearch" type="button" disabled>Cancel search</button></div>
 
   <section id="digits" class="active">
     <div class="card">
@@ -161,13 +161,52 @@ function formatDuration(seconds) {
   const minutes = Math.max(1, Math.round(seconds / 60));
   return `about ${format(minutes)} minute${minutes === 1 ? "" : "s"}`;
 }
-function confirmLargeSearch() {
+async function confirmLargeSearch() {
   if (digitCount <= LARGE_SEARCH_DIGIT_THRESHOLD) return true;
-  const estimatedSeconds = (digitCount * 4 / 9) / (5 * 1024 * 1024);
+  if (navigator.onLine === false) throw new Error("Your browser reports that it is offline. Reconnect before searching.");
+
+  const controller = new AbortController();
+  activeSearchController = controller;
+  byId("cancelSearch").disabled = false;
+  byId("loadStatus").textContent = "Checking your connection to the pi data…";
+  const probeIndices = [...new Set([1, Math.min(2, chunkCount - 1)])];
+  const startedAt = performance.now();
+  let downloadedBytes = 0;
+  try {
+    const responses = await Promise.all(probeIndices.map(async index => {
+      const response = await fetch(new URL(`data/pi-chunk-${String(index).padStart(4, "0")}.bin`, document.baseURI), {
+        cache: "no-store",
+        signal: controller.signal
+      });
+      if (!response.ok) throw new Error(`Pi data connection check failed (HTTP ${response.status}).`);
+      const bytes = await response.arrayBuffer();
+      const expectedDigits = Math.min(chunkDigitCount, digitCount - index * chunkDigitCount);
+      const expectedBytes = Math.ceil(expectedDigits / 9) * 4;
+      if (bytes.byteLength !== expectedBytes) {
+        throw new Error(`Pi data connection check got an incomplete chunk (${bytes.byteLength} of ${expectedBytes} bytes).`);
+      }
+      return bytes.byteLength;
+    }));
+    downloadedBytes = responses.reduce((total, size) => total + size, 0);
+  } catch (error) {
+    if (error.name === "AbortError") return false;
+    throw new Error(`Couldn't check the pi data connection: ${error.message} Check your connection and try again.`);
+  } finally {
+    if (activeSearchController === controller) activeSearchController = null;
+    byId("cancelSearch").disabled = true;
+  }
+
+  const elapsedSeconds = Math.max((performance.now() - startedAt) / 1000, 0.1);
+  const mebibytesPerSecond = downloadedBytes / elapsedSeconds / (1024 * 1024);
+  const datasetBytes = Math.ceil(digitCount / 9) * 4;
+  const estimatedSeconds = datasetBytes / (mebibytesPerSecond * 1024 * 1024);
+  byId("loadStatus").textContent =
+    `Connection check: ${mebibytesPerSecond.toFixed(1)} MiB/s. Checking the full index would take ` +
+    `${formatDuration(estimatedSeconds)} to download; scanning adds more time.`;
   return window.confirm(
-    `This search may need to check up to ${format(digitCount)} digits and take ` +
-    `${formatDuration(estimatedSeconds)} assuming a rough 5 MiB/s download speed. Your connection and ` +
-    `browser speed can make it faster or slower. Continue?`
+    `This search may scan up to ${format(digitCount)} digits. Your current connection checked at ` +
+    `${mebibytesPerSecond.toFixed(1)} MiB/s, which means downloading the full index alone could take ` +
+    `${formatDuration(estimatedSeconds)}. Scanning adds more time, and a match may be found sooner. Continue?`
   );
 }
 function showError(id, error) {
@@ -345,7 +384,7 @@ async function findMatch(kind, query, extra = {}) {
   const controller = new AbortController();
   const signal = controller.signal;
   activeSearchController = controller;
-  byId("cancelSearch").hidden = false;
+  byId("cancelSearch").disabled = false;
   byId("loadStatus").textContent = "Preparing parallel search…";
   if (!searchWorkerUrlPromise) {
     searchWorkerUrlPromise = fetch(new URL("search-worker.js?v=parallel-v5", document.baseURI), { cache: "no-store", signal })
@@ -448,7 +487,7 @@ async function findMatch(kind, query, extra = {}) {
     signal.removeEventListener("abort", cancelWorkers);
     workers.forEach(worker => worker.terminate());
     if (activeSearchController === controller) activeSearchController = null;
-    byId("cancelSearch").hidden = true;
+    byId("cancelSearch").disabled = true;
   }
 }
 async function search(kind, value) {
@@ -468,12 +507,13 @@ async function search(kind, value) {
     showResult(resultId, "A search is already running. Wait for it to finish before starting another.", true);
     return;
   }
-  if (!confirmLargeSearch()) {
-    showResult(resultId, "Search cancelled.");
-    return;
-  }
   searchInProgress = true;
   try {
+    if (!await confirmLargeSearch()) {
+      showResult(resultId, "Search cancelled.");
+      byId("loadStatus").textContent = "Search cancelled.";
+      return;
+    }
     let offset;
     try {
       offset = await findMatch(kind, query);
@@ -564,6 +604,7 @@ document.querySelectorAll("nav button").forEach(button => button.addEventListene
 byId("cancelSearch").addEventListener("click", () => {
   if (!activeSearchController) return;
   byId("loadStatus").textContent = "Cancelling search…";
+  byId("cancelSearch").disabled = true;
   activeSearchController.abort();
 });
 byId("searchDigits").addEventListener("click", () => search("digit"));
@@ -581,10 +622,10 @@ byId("imageFile").addEventListener("change", event => { imageFile = event.target
 byId("searchImage").addEventListener("click", async () => {
   if (!imageFile) { showResult("imageResult", "Choose an image first.", true); return; }
   if (searchInProgress) { showResult("imageResult", "A search is already running.", true); return; }
-  if (!confirmLargeSearch()) { showResult("imageResult", "Search cancelled."); return; }
   searchInProgress = true;
   let image;
   try {
+    if (!await confirmLargeSearch()) { showResult("imageResult", "Search cancelled."); return; }
     const width = clamp(byId("searchWidth").value, 2, 12);
     const height = clamp(byId("searchHeight").value, 2, 12);
     image = await createImageBitmap(imageFile);
@@ -937,10 +978,10 @@ async function searchShape() {
   for (const v of cells) query += v < 0 ? (S.pEmpty === "background" ? (bw ? "w" : "0") : ".") : bw ? (v ? "b" : "w") : String(v);
   if (!/[^.]/.test(query)) { hint.textContent = "Paint at least one cell first."; return; }
   if (searchInProgress) { hint.textContent = "A search is already running."; return; }
-  if (!confirmLargeSearch()) { hint.textContent = "Search cancelled."; return; }
   searchInProgress = true;
-  hint.textContent = "Searching…";
   try {
+    if (!await confirmLargeSearch()) { hint.textContent = "Search cancelled."; return; }
+    hint.textContent = "Searching…";
     const offset = bw || query.includes(".") ? await findMatch("pattern", query, bw ? bwExtra() : {}) : await findMatch("digit", query);
     if (offset < 0) { hint.textContent = "That shape was not found in the available digits."; return; }
     byId("imageOffset").value = offset;

@@ -37,8 +37,10 @@ Full searches use parallel browser workers (up to 16 with the max setting)
 to fetch and scan separate chunk ranges without blocking the page. Searches that find no match still
 need to download and scan the complete packed index, so their speed depends
 on the browser's network connection and available CPU cores. Large searches
-over 2 billion digits ask before scanning, show rough progress/time remaining,
-and can be cancelled.
+over 2 billion digits check the current connection against real index chunks
+before showing a download-time estimate and asking for confirmation. Progress
+shows a live end-to-end estimate, and the always-visible Cancel search button
+stops the active scan.
 
 `push.bat` builds the site, merges the latest `master` branch without replacing
 remote files, and pushes the repository configured in that file. When packed

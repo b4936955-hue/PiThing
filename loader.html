@@ -9,6 +9,7 @@
     main { width: min(560px, calc(100% - 48px)); padding: 24px; border: 1px solid #333; border-radius: 12px; background: #111; }
     p { color: #aaa; white-space: pre-wrap; line-height: 1.5; }
     button { border: 0; border-radius: 7px; padding: 9px 14px; cursor: pointer; font-weight: 700; }
+    button:disabled { cursor: wait; opacity: .55; }
   </style>
 </head>
 <body>
@@ -29,22 +30,55 @@
       ];
       var status = document.getElementById("status");
       var failures = [];
+      var timedFetch = async function (url) {
+        var controller = new AbortController();
+        var timeout = setTimeout(function () { controller.abort(); }, 15000);
+        try {
+          return await fetch(url, { cache: "no-store", signal: controller.signal });
+        } finally {
+          clearTimeout(timeout);
+        }
+      };
       for (var i = 0; i < sources.length; i++) {
         status.textContent = "Fetching the site (" + (i + 1) + "/" + sources.length + ")…";
         try {
-          var response = await fetch(sources[i] + "index.html?v=" + Date.now(), { cache: "no-store" });
+          var response = await timedFetch(sources[i] + "index.html?v=" + Date.now());
           if (!response.ok) {
             failures.push(sources[i] + " returned HTTP " + response.status);
             continue;
           }
           var html = await response.text();
+          var versionMatch = html.match(/name=["']pi-search-engine["']\s+content=["'](parallel-v\d+)["']/i);
           if (html.indexOf("The Library of Pi") < 0 ||
               html.indexOf("pi-index-meta.json") < 0 ||
-              html.indexOf('name="pi-search-engine" content="parallel-v3"') < 0 ||
+              !versionMatch ||
               html.indexOf("search-worker.js") < 0) {
-            failures.push(sources[i] + " did not contain the current parallel-search build");
+            failures.push(sources[i] + " returned HTML without a supported pi search build marker");
             continue;
           }
+
+          var version = versionMatch[1];
+          var checks = await Promise.all([
+            timedFetch(sources[i] + "data/pi-index-meta.json?v=" + Date.now()),
+            timedFetch(sources[i] + "search-worker.js?v=" + Date.now())
+          ]);
+          if (!checks[0].ok || !checks[1].ok) {
+            failures.push(sources[i] + " could not load both the pi metadata and search worker (HTTP " +
+              checks[0].status + "/" + checks[1].status + ")");
+            continue;
+          }
+          var metadata = await checks[0].json();
+          var worker = await checks[1].text();
+          if (!Number.isSafeInteger(metadata.digitCount) || metadata.digitCount < 1 ||
+              !Number.isSafeInteger(metadata.chunkDigitCount) || metadata.chunkDigitCount < 9 ||
+              !Number.isSafeInteger(metadata.chunkCount) || metadata.chunkCount < 1 ||
+              metadata.chunkCount !== Math.ceil(metadata.digitCount / metadata.chunkDigitCount) ||
+              metadata.format !== "packed9-le" ||
+              worker.indexOf("pi-worker-version: " + version) < 0) {
+            failures.push(sources[i] + " has mismatched or invalid page, data, and worker files");
+            continue;
+          }
+
           var base = "<base href=\"" + sources[i] + "\">";
           html = html.replace(/<head([^>]*)>/i, function (tag) { return tag + base; });
           document.open();
@@ -56,9 +90,14 @@
         }
       }
       var loader = document.getElementById("loader");
-      loader.innerHTML = "<h1>Loader failed</h1><p id=\"error\"></p><button onclick=\"location.reload()\">Retry</button>";
+      loader.innerHTML = "<h1>Could not connect to The Library of Pi</h1><p id=\"error\"></p><button id=\"retry\">Retry</button>";
+      document.getElementById("retry").addEventListener("click", function () { location.reload(); });
+      var offline = navigator.onLine === false;
       document.getElementById("error").textContent =
-        "Could not load the built site from " + USER + "/" + REPO + ". Run build.bat and push.bat first.\n" + failures.join("\n");
+        (offline
+          ? "Your browser reports that it is offline. Reconnect and retry."
+          : "The loader tried the available GitHub and CDN sources but could not verify a matching page, data index, and search worker. Check your connection or try again shortly.") +
+        "\n\n" + failures.join("\n");
     })();
   </script>
 </body>
