@@ -40,7 +40,7 @@
           var html = await response.text();
           if (html.indexOf("The Library of Pi") < 0 ||
               html.indexOf("pi-index-meta.json") < 0 ||
-              html.indexOf('name="pi-search-engine" content="parallel-v2"') < 0 ||
+              html.indexOf('name="pi-search-engine" content="parallel-v3"') < 0 ||
               html.indexOf("search-worker.js") < 0) {
             failures.push(sources[i] + " did not contain the current parallel-search build");
             continue;

@@ -33,13 +33,50 @@ function decodePacked(buffer, digitCount) {
   return digits;
 }
 
-function makeLetters(digits) {
-  const letters = new Uint8Array(Math.floor(digits.length / 2));
-  for (let digit = 0, letter = 0; digit + 1 < digits.length; digit += 2, letter++) {
-    const pair = (digits[digit] - 48) * 10 + digits[digit + 1] - 48;
-    letters[letter] = 65 + pair % 26;
+// Letter rule: read digits as numbers 1-26 (A=1 ... Z=26). Take two digits together
+// when they make 10-26, otherwise one digit alone. A lone 0 has no letter.
+// Returns the token width (1 or 2), or 0 if the next digit is needed but not loaded yet.
+// The numeric value of the token is left in tokenValue (0 means "no letter").
+let tokenValue = 0;
+function tokenAt(digits, i, atEnd) {
+  const d = digits[i] - 48;
+  if (d === 0 || d >= 3) { tokenValue = d; return 1; }
+  if (i + 1 >= digits.length) {
+    if (!atEnd) return 0;
+    tokenValue = d;
+    return 1;
   }
-  return toText(letters);
+  const pair = d * 10 + digits[i + 1] - 48;
+  if (pair <= 26) { tokenValue = pair; return 2; }
+  tokenValue = d;
+  return 1;
+}
+
+// Returns the letters, the digit index (within `digits`) where each letter starts,
+// and how many digits were consumed (the rest must be carried into the next chunk).
+function makeLetters(digits, atEnd) {
+  const letters = new Uint8Array(digits.length);
+  const starts = new Uint32Array(digits.length);
+  let count = 0;
+  let i = 0;
+  while (i < digits.length) {
+    const width = tokenAt(digits, i, atEnd);
+    if (width === 0) break;
+    if (tokenValue > 0) {
+      letters[count] = 64 + tokenValue;
+      starts[count] = i;
+      count++;
+    }
+    i += width;
+  }
+  return { text: toText(letters.subarray(0, count)), starts, used: i };
+}
+
+function joinBytes(a, b) {
+  const out = new Uint8Array(a.length + b.length);
+  out.set(a);
+  out.set(b, a.length);
+  return out;
 }
 
 function chunkName(index) {
@@ -49,10 +86,13 @@ function chunkName(index) {
 self.onmessage = async event => {
   const { kind, query, baseUrl, digitCount, chunkDigitCount, startChunk, endChunk, minOffset, maxOffset } = event.data;
   try {
-    let carry = "";
-    const unitsPerChunk = kind === "digit" ? chunkDigitCount : chunkDigitCount / 2;
+    // Offsets are always DIGIT offsets (for letters, the digit where the match's first letter starts).
+    let carry = "";          // last query.length-1 symbols of the previous chunk
+    let carryStarts = [];    // letters only: digit offset of each carried letter
+    let leftover = new Uint8Array(0); // letters only: digits not yet tokenized (needs next digit)
     for (let index = startChunk; index < endChunk; index++) {
-      const count = Math.min(chunkDigitCount, digitCount - index * chunkDigitCount);
+      const chunkStart = index * chunkDigitCount;
+      const count = Math.min(chunkDigitCount, digitCount - chunkStart);
       const url = new URL(`data/${chunkName(index)}`, baseUrl);
       const response = await fetch(url);
       if (!response.ok) throw new Error(`Could not load packed digit chunk ${index + 1} (HTTP ${response.status}).`);
@@ -62,19 +102,46 @@ self.onmessage = async event => {
         throw new Error(`Packed digit chunk ${index + 1} has ${buffer.byteLength} bytes; expected ${expectedBytes}.`);
       }
 
-      const digits = decodePacked(buffer, count);
-      const segment = kind === "digit" ? toText(digits) : makeLetters(digits);
+      const decoded = decodePacked(buffer, count);
+      const atEnd = chunkStart + count >= digitCount;
+      let segment, segmentStarts = null, base = 0;
+      if (kind === "digit") {
+        segment = toText(decoded);
+      } else {
+        // The first chunk a worker sees may start mid-token. That is harmless: any 0 or 3-9
+        // always ends a token, so the parse is back in sync long before minOffset.
+        const digits = leftover.length ? joinBytes(leftover, decoded) : decoded;
+        base = chunkStart - leftover.length;
+        const made = makeLetters(digits, atEnd);
+        segment = made.text;
+        segmentStarts = made.starts;
+        leftover = digits.slice(made.used);
+      }
+
       const combined = carry + segment;
+      const carryLength = carry.length;
+      const previousStarts = carryStarts;
+      const startOf = position => position < carryLength
+        ? previousStarts[position]
+        : base + segmentStarts[position - carryLength];
+
       let matchIndex = combined.indexOf(query);
       while (matchIndex >= 0) {
-        const offset = index * unitsPerChunk - carry.length + matchIndex;
+        const offset = kind === "digit" ? chunkStart - carryLength + matchIndex : startOf(matchIndex);
         if (offset >= minOffset && offset < maxOffset) {
           self.postMessage({ type: "done", offset });
           return;
         }
         matchIndex = combined.indexOf(query, matchIndex + 1);
       }
-      carry = combined.slice(Math.max(0, combined.length - query.length + 1));
+
+      const keep = Math.min(combined.length, Math.max(0, query.length - 1));
+      const from = combined.length - keep;
+      if (kind !== "digit") {
+        carryStarts = [];
+        for (let position = from; position < combined.length; position++) carryStarts.push(startOf(position));
+      }
+      carry = combined.slice(from);
       self.postMessage({ type: "progress", chunkIndex: index });
     }
     self.postMessage({ type: "done", offset: -1 });
