@@ -33,10 +33,12 @@ Browsing downloads only the chunks it needs; full searches scan chunks on
 demand in the browser. The root `index.html` is the default entry point for
 GitHub and jsDelivr. The browser version supports digit and letter
 search/browsing, date patterns, and digit-color images without an API server.
-Full searches use four parallel browser workers to fetch and scan separate
-chunk ranges without blocking the page. Searches that find no match still
+Full searches use parallel browser workers (up to 16 with the max setting)
+to fetch and scan separate chunk ranges without blocking the page. Searches that find no match still
 need to download and scan the complete packed index, so their speed depends
-on the browser's network connection and available CPU cores.
+on the browser's network connection and available CPU cores. Large searches
+over 2 billion digits ask before scanning, show rough progress/time remaining,
+and can be cancelled.
 
 `push.bat` builds the site, merges the latest `master` branch without replacing
 remote files, and pushes the repository configured in that file. When packed
@@ -122,13 +124,16 @@ The server automatically picks one, based on the digit file's size
 against a RAM budget (`PI_MAX_RAM_MB`, default 2048):
 
 - **ram-ascii** — small enough to decode fully into memory at startup.
-  Searches are a single native buffer scan: sub-millisecond to a few
-  milliseconds, even for a fairly large file.
+  Searches use native buffer scans in cancellable chunks.
 - **ram-packed** — too big to decode fully, but the packed bytes fit
-  in RAM. Still no disk I/O per search, just some CPU to decode on
-  the fly — noticeably slower than ram-ascii but still fast.
+  in RAM. Still no disk I/O per search; packed digits decode via a
+  triplet lookup table, and searches report progress and support cancellation.
 - **disk** — too big for either. Streams from disk in chunks, same as
   before, now with live progress and a cancel button.
+
+When the indexed set exceeds 2 billion digits, the search page confirms
+the maximum scan size and a rough duration before starting. The estimate is
+only a guide; actual time depends on CPU, storage, network, and cache state.
 
 Check which tier is active via the About page or `/api/status`.
 
@@ -159,8 +164,8 @@ number back.
   colors and digits are a straight 1-to-1 mapping. The result is shown
   with the matched region outlined in its surrounding context.
 
-Long disk-tier or remote searches report live progress and can be
-cancelled mid-scan.
+Long searches report live progress and can be cancelled mid-scan in every
+local speed tier and remote mode.
 
 ## The letter mapping
 

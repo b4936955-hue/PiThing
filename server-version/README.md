@@ -77,15 +77,16 @@ The server automatically picks one, based on the digit file's size
 against a RAM budget (`PI_MAX_RAM_MB`, default 2048):
 
 - **ram-ascii** — small enough to decode fully into memory at startup.
-  Searches are a single native buffer scan: sub-millisecond to a few
-  milliseconds, even for a fairly large file.
+  Searches use native buffer scans in cancellable chunks.
 - **ram-packed** — too big to decode fully, but the packed bytes fit
-  in RAM. Still no disk I/O per search, just some CPU to decode on
-  the fly — noticeably slower than ram-ascii but still fast.
+  in RAM. Still no disk I/O per search; packed digits decode via a
+  triplet lookup table, and searches report progress and support cancellation.
 - **disk** — too big for either. Streams from disk in chunks, same as
   before, now with live progress and a cancel button.
 
 Check which tier is active via the About page or `/api/status`.
+Searches over 2 billion digits ask for confirmation with a rough duration
+estimate. Actual time depends on CPU, storage, network, and cache state.
 
 ## Storage format
 
@@ -114,8 +115,8 @@ number back.
   colors and digits are a straight 1-to-1 mapping. The result is shown
   with the matched region outlined in its surrounding context.
 
-Long disk-tier or remote searches report live progress and can be
-cancelled mid-scan.
+Long searches report live progress and can be cancelled mid-scan in every
+local speed tier and remote mode.
 
 ## The letter mapping (a judgment call)
 

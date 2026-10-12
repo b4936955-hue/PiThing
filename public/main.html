@@ -743,6 +743,25 @@ function renderContext(el, context, highlightClass) {
         escapeHtml(context.after);
 }
 
+const LARGE_SEARCH_DIGIT_THRESHOLD = 2_000_000_000;
+
+function estimatedDigitsPerSecond(kind) {
+    const rateByTier = {
+        "ram-ascii": 250_000_000,
+        "ram-packed": 20_000_000,
+        "disk": 10_000_000,
+        "remote": 5_000_000
+    };
+    const baseRate = rateByTier[currentTier] || 10_000_000;
+    return kind === "letter" ? baseRate / 4 : baseRate;
+}
+
+function formatDuration(seconds) {
+    if (seconds < 60) return seconds < 10 ? "under 10 seconds" : "under 1 minute";
+    const minutes = Math.max(1, Math.round(seconds / 60));
+    return `about ${fmtNum(minutes)} minute${minutes === 1 ? "" : "s"}`;
+}
+
 function setupSearch(kind) {
     const input = document.getElementById(kind + "SearchInput");
     const btn = document.getElementById(kind + "SearchBtn");
@@ -758,6 +777,17 @@ function setupSearch(kind) {
     async function doSearch(overrideQuery) {
         const query = (overrideQuery ?? input.value).trim();
         if (!query) return;
+        if (btn.disabled) return;
+        if (!digitCount) await loadStatus();
+        if (digitCount > LARGE_SEARCH_DIGIT_THRESHOLD) {
+            const estimateSeconds = digitCount / estimatedDigitsPerSecond(kind);
+            const accepted = window.confirm(
+                `This large search may scan up to ${fmtNum(digitCount)} digits of pi and take ` +
+                `${formatDuration(estimateSeconds)}. A match may be found sooner, and the estimate ` +
+                `depends on your hardware and current load. Continue?`
+            );
+            if (!accepted) return;
+        }
         if (overrideQuery) input.value = overrideQuery;
 
         contextEl.style.display = "none";
@@ -767,6 +797,7 @@ function setupSearch(kind) {
         cancelBtn.style.display = "inline-block";
         progressWrap.classList.remove("visible");
         progressFill.style.width = "0%";
+        const startedAt = Date.now();
 
         controller = new AbortController();
 
@@ -777,7 +808,13 @@ function setupSearch(kind) {
                     progressWrap.classList.add("visible");
                     const pct = Math.round(fraction * 100);
                     progressFill.style.width = pct + "%";
-                    progressLabel.textContent = pct + "%";
+                    const elapsedSeconds = (Date.now() - startedAt) / 1000;
+                    const remainingSeconds = fraction > 0 && fraction < 1
+                        ? elapsedSeconds * (1 - fraction) / fraction
+                        : 0;
+                    progressLabel.textContent = fraction > 0 && fraction < 1
+                        ? `${pct}% · ~${formatDuration(remainingSeconds)} left`
+                        : pct + "%";
                 }
             });
 

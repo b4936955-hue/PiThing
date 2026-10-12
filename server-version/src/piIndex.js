@@ -46,6 +46,13 @@ const RAM_BUDGET_BYTES = Number(process.env.PI_MAX_RAM_BYTES) || (Number(process
 const CHUNK_SIZE = Number(process.env.PI_TEST_CHUNK_SIZE) || 32 * 1024 * 1024;
 const DIGITS_PER_BLOCK = 9;
 const BLOCK_BYTES = 4;
+const DIGIT_TRIPLETS = Buffer.allocUnsafe(3000);
+for (let value = 0; value < 1000; value++) {
+    const offset = value * 3;
+    DIGIT_TRIPLETS[offset] = 48 + Math.floor(value / 100);
+    DIGIT_TRIPLETS[offset + 1] = 48 + Math.floor(value / 10) % 10;
+    DIGIT_TRIPLETS[offset + 2] = 48 + value % 10;
+}
 
 let meta = null;
 let digitsFilePath = null;
@@ -173,19 +180,24 @@ function decodeBlocksToAscii(packedBuf, digitOffset, digitLength, blockBase = 0)
     const endBlock = Math.floor((digitOffset + digitLength - 1) / DIGITS_PER_BLOCK);
     const blockCount = endBlock - startBlock + 1;
 
-    const out = Buffer.alloc(blockCount * DIGITS_PER_BLOCK);
+    const out = Buffer.allocUnsafe(blockCount * DIGITS_PER_BLOCK);
 
     for (let b = 0; b < blockCount; b++) {
         const byteOffset = (startBlock + b - blockBase) * BLOCK_BYTES;
-        let value = packedBuf.readUInt32LE(byteOffset);
-
-        // Write 9 digits, least-significant first, then we've built
-        // them back-to-front — fill from the end of this block's slot.
+        const value = packedBuf.readUInt32LE(byteOffset);
+        const hundreds = ((value / 1_000_000) | 0) * 3;
+        const tens = (((value / 1_000) | 0) % 1_000) * 3;
+        const ones = (value % 1_000) * 3;
         const base = b * DIGITS_PER_BLOCK;
-        for (let i = DIGITS_PER_BLOCK - 1; i >= 0; i--) {
-            out[base + i] = 48 + (value % 10); // ASCII '0' + digit
-            value = (value / 10) | 0;
-        }
+        out[base] = DIGIT_TRIPLETS[hundreds];
+        out[base + 1] = DIGIT_TRIPLETS[hundreds + 1];
+        out[base + 2] = DIGIT_TRIPLETS[hundreds + 2];
+        out[base + 3] = DIGIT_TRIPLETS[tens];
+        out[base + 4] = DIGIT_TRIPLETS[tens + 1];
+        out[base + 5] = DIGIT_TRIPLETS[tens + 2];
+        out[base + 6] = DIGIT_TRIPLETS[ones];
+        out[base + 7] = DIGIT_TRIPLETS[ones + 1];
+        out[base + 8] = DIGIT_TRIPLETS[ones + 2];
     }
 
     const sliceStart = digitOffset - startBlock * DIGITS_PER_BLOCK;
@@ -312,16 +324,15 @@ async function searchDigits(query, options = {}) {
     }
 
     if (tier === "ram-ascii") {
-        const offset = ramAscii.indexOf(query, 0, "ascii");
-        const result = offset === -1 ? null : offset;
-        cacheSet(cacheKey, result);
-        return { offset: result, tier };
+        const { offset, cancelled } = await searchWithinAsciiBuffer(ramAscii, query, options);
+        if (!cancelled) cacheSet(cacheKey, offset);
+        return { offset, tier, cancelled };
     }
 
     if (tier === "ram-packed") {
-        const offset = searchWithinPackedBuffer(ramPacked, query);
-        cacheSet(cacheKey, offset);
-        return { offset, tier };
+        const { offset, cancelled } = await searchWithinPackedBuffer(ramPacked, query, options);
+        if (!cancelled) cacheSet(cacheKey, offset);
+        return { offset, tier, cancelled };
     }
 
     // disk tier — stream, with progress + cancellation
@@ -333,7 +344,30 @@ async function searchDigits(query, options = {}) {
 // Scans an in-RAM packed buffer by decoding it in large sub-chunks
 // (so we're not materializing hundreds of millions of ASCII bytes at
 // once) with the same overlap-safe technique used for disk streaming.
-function searchWithinPackedBuffer(packedBuf, query) {
+function yieldToEventLoop() {
+    return new Promise(resolve => setImmediate(resolve));
+}
+
+async function searchWithinAsciiBuffer(asciiBuf, query, { signal, onProgress } = {}) {
+    const needle = Buffer.from(query, "ascii");
+    const chunkSize = 64 * 1024 * 1024;
+
+    for (let start = 0; start < asciiBuf.length; start += chunkSize) {
+        if (signal && signal.aborted) return { offset: null, cancelled: true };
+
+        const end = Math.min(asciiBuf.length, start + chunkSize);
+        const searchEnd = Math.min(asciiBuf.length, end + needle.length - 1);
+        const relativeOffset = asciiBuf.subarray(start, searchEnd).indexOf(needle);
+        if (relativeOffset !== -1) return { offset: start + relativeOffset, cancelled: false };
+
+        if (onProgress) onProgress(end / asciiBuf.length);
+        await yieldToEventLoop();
+    }
+
+    return { offset: null, cancelled: Boolean(signal && signal.aborted) };
+}
+
+async function searchWithinPackedBuffer(packedBuf, query, { signal, onProgress } = {}) {
     const needle = Buffer.from(query, "ascii");
     const overlapSize = needle.length - 1;
 
@@ -344,6 +378,8 @@ function searchWithinPackedBuffer(packedBuf, query) {
     let digitBase = 0;
 
     for (let blockStart = 0; blockStart < totalBlocks; blockStart += blocksPerSubchunk) {
+        if (signal && signal.aborted) return { offset: null, cancelled: true };
+
         const blockCount = Math.min(blocksPerSubchunk, totalBlocks - blockStart);
         const digitOffset = blockStart * DIGITS_PER_BLOCK;
         const digitLength = Math.min(blockCount * DIGITS_PER_BLOCK, meta.digitCount - digitOffset);
@@ -353,14 +389,16 @@ function searchWithinPackedBuffer(packedBuf, query) {
         const idx = buf.indexOf(needle);
 
         if (idx !== -1) {
-            return digitBase - carry.length + idx;
+            return { offset: digitBase - carry.length + idx, cancelled: false };
         }
 
         digitBase += ascii.length;
         carry = overlapSize > 0 ? buf.subarray(Math.max(0, buf.length - overlapSize)) : Buffer.alloc(0);
+        if (onProgress) onProgress(digitBase / meta.digitCount);
+        await yieldToEventLoop();
     }
 
-    return null;
+    return { offset: null, cancelled: Boolean(signal && signal.aborted) };
 }
 
 function streamSearchDigitsFromDisk(query, { signal, onProgress } = {}) {
@@ -461,7 +499,9 @@ async function searchLetters(query, options = {}) {
     let found = null;
 
     for (let offset = 0; offset < meta.digitCount; offset += stepDigits) {
-        if (options.signal && options.signal.aborted) break;
+        if (options.signal && options.signal.aborted) {
+            return { offset: null, tier, cancelled: true };
+        }
 
         const length = Math.min(stepDigits, meta.digitCount - offset);
         const evenLength = length - (length % 2);
@@ -486,10 +526,14 @@ async function searchLetters(query, options = {}) {
         carry = overlapSize > 0 ? buf.subarray(Math.max(0, buf.length - overlapSize)) : Buffer.alloc(0);
 
         if (options.onProgress) options.onProgress((offset + evenLength) / meta.digitCount);
+        await yieldToEventLoop();
     }
 
+    if (options.signal && options.signal.aborted) {
+        return { offset: null, tier, cancelled: true };
+    }
     cacheSet(cacheKey, found);
-    return { offset: found, tier };
+    return { offset: found, tier, cancelled: false };
 }
 
 module.exports = {

@@ -1,4 +1,4 @@
-// pi-worker-version: parallel-v4
+// pi-worker-version: parallel-v5
 "use strict";
 
 const digitTriplets = new Uint8Array(3000);

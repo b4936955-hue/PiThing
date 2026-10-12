@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="pi-search-engine" content="parallel-v3">
+  <meta name="pi-search-engine" content="parallel-v5">
   <title>The Library of Pi</title>
   <style>
     :root { color-scheme: dark; font: 15px Arial, sans-serif; background: #09090b; color: #eee; }
@@ -62,7 +62,7 @@
       <button data-view="settings">Settings</button>
     </nav>
   </header>
-  <p id="loadStatus">Loading the pi digit library…</p>
+  <div class="row"><p id="loadStatus">Loading the pi digit library…</p><button class="secondary" id="cancelSearch" type="button" hidden>Cancel search</button></div>
 
   <section id="digits" class="active">
     <div class="card">
@@ -150,10 +150,26 @@ const chunkCache = new Map();
 let imageFile = null;
 let searchInProgress = false;
 let searchWorkerUrlPromise;
+let activeSearchController = null;
 
 const byId = id => document.getElementById(id);
 const format = value => Number(value).toLocaleString();
 const clamp = (value, low, high) => Math.min(high, Math.max(low, Math.floor(Number(value) || 0)));
+const LARGE_SEARCH_DIGIT_THRESHOLD = 2_000_000_000;
+function formatDuration(seconds) {
+  if (seconds < 60) return "less than a minute";
+  const minutes = Math.max(1, Math.round(seconds / 60));
+  return `about ${format(minutes)} minute${minutes === 1 ? "" : "s"}`;
+}
+function confirmLargeSearch() {
+  if (digitCount <= LARGE_SEARCH_DIGIT_THRESHOLD) return true;
+  const estimatedSeconds = (digitCount * 4 / 9) / (5 * 1024 * 1024);
+  return window.confirm(
+    `This search may need to check up to ${format(digitCount)} digits and take ` +
+    `${formatDuration(estimatedSeconds)} assuming a rough 5 MiB/s download speed. Your connection and ` +
+    `browser speed can make it faster or slower. Continue?`
+  );
+}
 function showError(id, error) {
   const el = byId(id);
   el.classList.add("error");
@@ -326,14 +342,19 @@ function renderHistory(kind, items) {
   }
 }
 async function findMatch(kind, query, extra = {}) {
+  const controller = new AbortController();
+  const signal = controller.signal;
+  activeSearchController = controller;
+  byId("cancelSearch").hidden = false;
+  byId("loadStatus").textContent = "Preparing parallel search…";
   if (!searchWorkerUrlPromise) {
-    searchWorkerUrlPromise = fetch(new URL("search-worker.js?v=parallel-v4", document.baseURI), { cache: "no-store" })
+    searchWorkerUrlPromise = fetch(new URL("search-worker.js?v=parallel-v5", document.baseURI), { cache: "no-store", signal })
       .then(response => {
         if (!response.ok) throw new Error(`Could not load the parallel search worker (HTTP ${response.status}).`);
         return response.text();
       })
       .then(source => {
-        if (!source.includes("pi-worker-version: parallel-v4")) throw new Error("search-worker.js on the server is out of date (it has no shape/pattern search). Run build.bat and push.bat, then hard refresh with Ctrl+F5.");
+        if (!source.includes("pi-worker-version: parallel-v5")) throw new Error("search-worker.js on the server is out of date (it has no shape/pattern search). Run build.bat and push.bat, then hard refresh with Ctrl+F5.");
         return URL.createObjectURL(new Blob([source], { type: "text/javascript" }));
       })
       .catch(error => {
@@ -341,13 +362,21 @@ async function findMatch(kind, query, extra = {}) {
         throw error;
       });
   }
-  const workerUrl = await searchWorkerUrlPromise;
-  const workerCount = Math.min(speedParams().workers, chunkCount);
   const workers = [];
+  const cancelResolvers = [];
+  const cancelWorkers = () => {
+    workers.forEach(worker => worker.terminate());
+    cancelResolvers.forEach(resolve => resolve({ cancelled: true }));
+  };
+  signal.addEventListener("abort", cancelWorkers, { once: true });
+  try {
+  const workerUrl = await searchWorkerUrlPromise;
+  if (signal.aborted) throw new DOMException("Search cancelled.", "AbortError");
+  const workerCount = Math.min(speedParams().workers, chunkCount);
   const jobs = [];
   const completedChunks = new Set();
+  const startedAt = Date.now();
 
-  try {
     for (let workerIndex = 0; workerIndex < workerCount; workerIndex++) {
       const worker = new Worker(workerUrl);
       workers.push(worker);
@@ -356,12 +385,19 @@ async function findMatch(kind, query, extra = {}) {
       const endChunk = Math.floor(chunkCount * (workerIndex + 1) / workerCount);
       const totalUnits = digitCount;
       jobs.push(new Promise(resolve => {
+        cancelResolvers.push(resolve);
         worker.onmessage = event => {
           const message = event.data;
           if (message.type === "progress") {
             completedChunks.add(message.chunkIndex);
+            const fraction = Math.min(1, completedChunks.size * chunkDigitCount / digitCount);
+            const elapsedSeconds = (Date.now() - startedAt) / 1000;
+            const remainingSeconds = fraction > 0 && fraction < 1
+              ? elapsedSeconds * (1 - fraction) / fraction
+              : 0;
             byId("loadStatus").textContent =
-              `Searching ${format(Math.min(completedChunks.size * chunkDigitCount, digitCount))} of ${format(digitCount)} digits (${workerCount} workers)…`;
+              `Searching ${format(Math.min(completedChunks.size * chunkDigitCount, digitCount))} of ${format(digitCount)} digits` +
+              `${remainingSeconds ? ` (~${formatDuration(remainingSeconds)} left)` : ""} (${workerCount} workers)…`;
           } else if (message.type === "done") {
             resolve({ offset: message.offset });
           } else if (message.type === "error") {
@@ -394,6 +430,7 @@ async function findMatch(kind, query, extra = {}) {
         let remaining = jobs.length;
         for (const job of jobs) job.then(result => {
           if (result.error) reject(result.error);
+          else if (result.cancelled) reject(new DOMException("Search cancelled.", "AbortError"));
           else if (result.offset >= 0) resolve(result.offset);
           else if (--remaining === 0) resolve(-1);
         });
@@ -402,12 +439,16 @@ async function findMatch(kind, query, extra = {}) {
     for (const job of jobs) {
       const result = await job;
       if (result.error) throw result.error;
+      if (result.cancelled) throw new DOMException("Search cancelled.", "AbortError");
       const offset = result.offset;
       if (offset >= 0) return offset;
     }
     return -1;
   } finally {
+    signal.removeEventListener("abort", cancelWorkers);
     workers.forEach(worker => worker.terminate());
+    if (activeSearchController === controller) activeSearchController = null;
+    byId("cancelSearch").hidden = true;
   }
 }
 async function search(kind, value) {
@@ -427,12 +468,21 @@ async function search(kind, value) {
     showResult(resultId, "A search is already running. Wait for it to finish before starting another.", true);
     return;
   }
+  if (!confirmLargeSearch()) {
+    showResult(resultId, "Search cancelled.");
+    return;
+  }
   searchInProgress = true;
   try {
     let offset;
     try {
       offset = await findMatch(kind, query);
     } catch (error) {
+      if (error.name === "AbortError") {
+        showResult(resultId, "Search cancelled.");
+        byId("loadStatus").textContent = "Search cancelled.";
+        return;
+      }
       showError(resultId, error);
       byId("loadStatus").textContent = "Search could not be completed.";
       return;
@@ -511,6 +561,11 @@ function nearestDigit(r, g, b) {
 }
 
 document.querySelectorAll("nav button").forEach(button => button.addEventListener("click", () => setView(button.dataset.view)));
+byId("cancelSearch").addEventListener("click", () => {
+  if (!activeSearchController) return;
+  byId("loadStatus").textContent = "Cancelling search…";
+  activeSearchController.abort();
+});
 byId("searchDigits").addEventListener("click", () => search("digit"));
 byId("searchLetters").addEventListener("click", () => search("letter"));
 byId("digitQuery").addEventListener("keydown", event => { if (event.key === "Enter") search("digit"); });
@@ -525,10 +580,14 @@ byId("renderImage").addEventListener("click", () => drawImage(byId("imageOffset"
 byId("imageFile").addEventListener("change", event => { imageFile = event.target.files[0] || null; });
 byId("searchImage").addEventListener("click", async () => {
   if (!imageFile) { showResult("imageResult", "Choose an image first.", true); return; }
+  if (searchInProgress) { showResult("imageResult", "A search is already running.", true); return; }
+  if (!confirmLargeSearch()) { showResult("imageResult", "Search cancelled."); return; }
+  searchInProgress = true;
+  let image;
   try {
     const width = clamp(byId("searchWidth").value, 2, 12);
     const height = clamp(byId("searchHeight").value, 2, 12);
-    const image = await createImageBitmap(imageFile);
+    image = await createImageBitmap(imageFile);
     const canvas = document.createElement("canvas");
     canvas.width = width;
     canvas.height = height;
@@ -547,9 +606,13 @@ byId("searchImage").addEventListener("click", async () => {
       byId("imageOffset").value = offset;
       await drawImage(offset, width, height, byId("imageMode").value);
     }
-    image.close();
   } catch (error) {
-    showError("imageResult", error);
+    if (error.name === "AbortError") showResult("imageResult", "Search cancelled.");
+    else showError("imageResult", error);
+  } finally {
+    if (image) image.close();
+    searchInProgress = false;
+    byId("loadStatus").textContent = `Ready: ${format(digitCount)} digits.`;
   }
 });
 
@@ -874,6 +937,7 @@ async function searchShape() {
   for (const v of cells) query += v < 0 ? (S.pEmpty === "background" ? (bw ? "w" : "0") : ".") : bw ? (v ? "b" : "w") : String(v);
   if (!/[^.]/.test(query)) { hint.textContent = "Paint at least one cell first."; return; }
   if (searchInProgress) { hint.textContent = "A search is already running."; return; }
+  if (!confirmLargeSearch()) { hint.textContent = "Search cancelled."; return; }
   searchInProgress = true;
   hint.textContent = "Searching…";
   try {
@@ -886,7 +950,7 @@ async function searchShape() {
     hint.textContent = `Found at digit offset ${format(offset)}, shown above at width ${S.pW}.`;
     showResult("imageResult", `Shape found at digit offset ${format(offset)} (position ${format(offset + 1)}).`);
   } catch (error) {
-    hint.textContent = error.message || String(error);
+    hint.textContent = error.name === "AbortError" ? "Search cancelled." : error.message || String(error);
   } finally {
     searchInProgress = false;
     byId("loadStatus").textContent = `Ready: ${format(digitCount)} digits.`;
