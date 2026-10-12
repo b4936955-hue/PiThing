@@ -41,20 +41,13 @@
     .srow > span { flex: 1; }
     .srow input[type=range] { flex: 1.2; padding: 0; }
     .srow output { min-width: 46px; text-align: right; color: #92929a; font-size: 12px; }
-    .painter { display: inline-block; margin-top: 14px; padding: 16px; background: #11111f; border: 1px solid #23233a; border-radius: 14px; font-family: "Courier New", monospace; }
-    .ptitle { color: #4b5a8f; font-size: 12px; letter-spacing: .25em; display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 10px; }
-    .pdim { letter-spacing: 0; display: flex; gap: 4px; align-items: center; }
-    .pdim input { width: 54px; padding: 4px 6px; }
-    .ptools { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
-    .ptool { min-width: 28px; height: 28px; border: 2px solid transparent; border-radius: 7px; padding: 0 6px; font-size: 11px; font-weight: 700; color: #aab; background: #17172b; }
-    .ptool.on { border-color: #fff; }
-    .pgrid { display: grid; gap: var(--pg); touch-action: none; user-select: none; }
-    .pcell { width: var(--pc); height: var(--pc); background: #17172b; border-radius: 10px; cursor: pointer; }
-    .prow { display: flex; gap: 10px; margin-top: 12px; }
-    .psearch, .pclear { flex: 1; padding: 12px; border-radius: 8px; font: 700 13px "Courier New", monospace; letter-spacing: .15em; }
-    .psearch { background: #f0b43c; color: #2a1f00; border: 0; }
-    .pclear { background: transparent; color: #6f86c8; border: 1px solid #23233a; }
-    .phint { margin-top: 10px; color: #4d5c90; font-size: 12px; letter-spacing: .06em; text-align: center; max-width: 360px; }
+    .painter { margin-top: 4px; }
+    .ptools { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+    .ptool { min-width: 32px; height: 32px; border: 1px solid var(--cellbd); border-radius: 8px; padding: 0 8px; font-size: 12px; font-weight: 700; background: var(--empty); color: inherit; }
+    .ptool.on { outline: 2px solid var(--accent); outline-offset: 2px; }
+    .pgrid { display: grid; gap: var(--pg); margin-top: 14px; width: fit-content; max-width: 100%; touch-action: none; user-select: none; }
+    .pcell { aspect-ratio: 1; background: var(--empty); border: 1px solid var(--cellbd); border-radius: 8px; cursor: pointer; }
+    .phint { margin: 10px 0 0; }
   </style>
 </head>
 <body>
@@ -117,9 +110,13 @@
       <p>Each digit maps to a color. Browse a patch or upload an image to find its nearest color pattern in pi.</p>
       <div class="row"><label for="imageOffset">Offset</label><input id="imageOffset" type="number" min="0" value="0"><label for="imageWidth">Width</label><input id="imageWidth" type="number" min="1" max="40" value="20"><label for="imageHeight">Height</label><input id="imageHeight" type="number" min="1" max="40" value="20"><select id="imageMode"><option value="color">Colors</option><option value="bw">Black &amp; white</option></select><button class="primary" id="renderImage">Render</button></div>
       <canvas id="imageCanvas"></canvas>
-      <div id="painter" class="painter"></div>
       <div class="row"><input id="imageFile" type="file" accept="image/*"><label for="searchWidth">Pattern width</label><input id="searchWidth" type="number" min="2" max="12" value="4"><label for="searchHeight">Pattern height</label><input id="searchHeight" type="number" min="2" max="12" value="4"><button class="primary" id="searchImage">Find image</button></div>
       <div id="imageResult" class="result" aria-live="polite"></div>
+    </div>
+    <div class="card">
+      <h2>Draw a shape</h2>
+      <p>Paint cells, then search pi for that shape. Click a painted cell again to clear it. Empty cells match anything.</p>
+      <div id="painter" class="painter"></div>
     </div>
   </section>
 
@@ -330,19 +327,22 @@ function renderHistory(kind, items) {
 }
 async function findMatch(kind, query, extra = {}) {
   if (!searchWorkerUrlPromise) {
-    searchWorkerUrlPromise = fetch(new URL("search-worker.js?v=parallel-v3", document.baseURI), { cache: "no-store" })
+    searchWorkerUrlPromise = fetch(new URL("search-worker.js?v=parallel-v4", document.baseURI), { cache: "no-store" })
       .then(response => {
         if (!response.ok) throw new Error(`Could not load the parallel search worker (HTTP ${response.status}).`);
         return response.text();
       })
-      .then(source => URL.createObjectURL(new Blob([source], { type: "text/javascript" })))
+      .then(source => {
+        if (!source.includes("pi-worker-version: parallel-v4")) throw new Error("search-worker.js on the server is out of date (it has no shape/pattern search). Run build.bat and push.bat, then hard refresh with Ctrl+F5.");
+        return URL.createObjectURL(new Blob([source], { type: "text/javascript" }));
+      })
       .catch(error => {
         searchWorkerUrlPromise = undefined;
         throw error;
       });
   }
   const workerUrl = await searchWorkerUrlPromise;
-  const workerCount = Math.min(S.workers, chunkCount);
+  const workerCount = Math.min(speedParams().workers, chunkCount);
   const workers = [];
   const jobs = [];
   const completedChunks = new Set();
@@ -374,6 +374,7 @@ async function findMatch(kind, query, extra = {}) {
             kind,
             query,
             ...extra,
+            prefetch: speedParams().prefetch,
             baseUrl: document.baseURI,
             digitCount,
             chunkDigitCount,
@@ -388,6 +389,16 @@ async function findMatch(kind, query, extra = {}) {
       }));
     }
 
+    if (S.anyMatch) {
+      return await new Promise((resolve, reject) => {
+        let remaining = jobs.length;
+        for (const job of jobs) job.then(result => {
+          if (result.error) reject(result.error);
+          else if (result.offset >= 0) resolve(result.offset);
+          else if (--remaining === 0) resolve(-1);
+        });
+      });
+    }
     for (const job of jobs) {
       const result = await job;
       if (result.error) throw result.error;
@@ -632,7 +643,10 @@ const SCHEMA = [
     ["context", "Characters of context around a match", "num", 40, 5, 200, 5]
   ]],
   ["Search and performance", [
-    ["workers", "Parallel search workers", "num", 4, 1, 16, 1],
+    ["speed", "Search speed (light, balanced, fast, max, or custom)", "select", "fast", ["light", "balanced", "fast", "max", "custom"]],
+    ["workers", "Custom speed: parallel workers", "num", 6, 1, 32, 1],
+    ["prefetch", "Custom speed: chunks downloaded ahead per worker", "num", 3, 1, 8, 1],
+    ["anyMatch", "Stop at the first match any worker finds (faster, but not always the earliest in pi)", "check", false],
     ["cacheChunks", "Chunks kept in memory", "num", 2, 1, 8, 1],
     ["history", "Search history length", "num", 10, 0, 50, 1]
   ]],
@@ -666,6 +680,16 @@ const saveSettings = () => { try { localStorage.setItem("piSettings", JSON.strin
 const lum = hex => { const n = parseInt(hex.slice(1), 16); return 0.299 * (n >> 16) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255); };
 const isBlackDigit = digit => (digit > S.bwThreshold) !== S.bwInvert;
 const bwExtra = () => ({ bw: true, bwThreshold: S.bwThreshold, bwInvert: S.bwInvert });
+function speedParams() {
+  const cores = navigator.hardwareConcurrency || 4;
+  switch (S.speed) {
+    case "light": return { workers: Math.max(1, Math.floor(cores / 4)), prefetch: 1 };
+    case "balanced": return { workers: Math.max(2, Math.floor(cores / 2)), prefetch: 2 };
+    case "fast": return { workers: Math.min(16, Math.max(4, cores)), prefetch: 3 };
+    case "max": return { workers: Math.min(16, cores * 2), prefetch: 4 };
+    default: return { workers: S.workers, prefetch: S.prefetch };
+  }
+}
 const THEMES = {
   dark:  { bg: "#09090b", fg: "#eeeeee", card: "#101012", bd: "#222226", inp: "#111114", ibd: "#303036", dig: "#0b0b0e", mut: "#92929a", nbd: "#29292e", nfg: "#c5c5cc" },
   light: { bg: "#f3f3f6", fg: "#16161a", card: "#ffffff", bd: "#d6d6dd", inp: "#ffffff", ibd: "#c4c4cc", dig: "#f0f0f4", mut: "#5c5c68", nbd: "#cfcfd6", nfg: "#33333b" },
@@ -701,7 +725,7 @@ function applySettings() {
   let style = byId("dynStyle");
   if (!style) { style = document.createElement("style"); style.id = "dynStyle"; document.head.append(style); }
   style.textContent = `
-    :root { color-scheme: ${S.theme === "light" ? "light" : "dark"}; background: ${T.bg}; color: ${T.fg}; font-size: ${S.baseFont}px; }
+    :root { color-scheme: ${S.theme === "light" ? "light" : "dark"}; background: ${T.bg}; color: ${T.fg}; font-size: ${S.baseFont}px; --accent: ${S.accent}; --empty: ${T.inp}; --cellbd: ${T.ibd}; }
     body { background: ${T.bg}; }
     main { width: min(${S.pageWidth}px, 100%); zoom: ${S.uiScale / 100}; }
     p, .muted, .srow output { color: ${T.mut}; }
@@ -790,7 +814,7 @@ byId("resetSettings").addEventListener("click", () => {
 byId("imageMode").addEventListener("change", event => { S.imageMode = event.target.value; syncControls(); commit("imageMode"); });
 
 // ----- shape painter: -1 = empty. Color mode: 0-9 = exact digit. Black & white mode: 0 = white, 1 = black -----
-let cells = [], tool = 5, painting = false;
+let cells = [], tool = 5, painting = false, dragValue = -1;
 const isBw = () => byId("imageMode").value === "bw";
 function resetCells() { cells = new Array(S.pW * S.pH).fill(-1); tool = isBw() ? 1 : 5; }
 const cellColor = v => v < 0 ? "" : isBw() ? (v ? S.bwBlack : S.bwWhite) : colors[v];
@@ -802,11 +826,11 @@ function buildPainter() {
   el.style.setProperty("--pc", S.pCell + "px");
   el.style.setProperty("--pg", S.pGap + "px");
   el.innerHTML =
-    `<div class="ptitle"><span>DRAW A SHAPE · ${S.pW}×${S.pH}</span><span class="pdim">W <input type="number" id="pWIn" min="1" max="12" value="${S.pW}"> H <input type="number" id="pHIn" min="1" max="12" value="${S.pH}"></span></div>` +
-    `<div class="ptools">${tools.map(([v, l]) => `<button class="ptool${tool === v ? " on" : ""}" data-tool="${v}" title="${l}" style="background:${cellColor(v)};color:${lum(cellColor(v)) > 140 ? "#000" : "#fff"}">${bw ? l : v}</button>`).join("")}<button class="ptool${tool === -1 ? " on" : ""}" data-tool="-1" title="Erase">✕</button></div>` +
-    `<div class="pgrid" style="grid-template-columns:repeat(${S.pW},var(--pc))">${cells.map((v, i) => `<div class="pcell" data-i="${i}" style="background:${cellColor(v)}"></div>`).join("")}</div>` +
-    `<div class="prow"><button class="psearch" id="pSearch">SEARCH</button><button class="pclear" id="pClear">CLEAR</button></div>` +
-    `<div class="phint" id="pHint">click or drag to paint · right-click erases · empty cells ${S.pEmpty === "any" ? "match anything" : "match the background"} · small shapes are found fastest</div>`;
+    `<div class="row"><label for="pWIn">Width</label><input type="number" id="pWIn" min="1" max="12" value="${S.pW}"><label for="pHIn">Height</label><input type="number" id="pHIn" min="1" max="12" value="${S.pH}"><span class="muted">${bw ? "black &amp; white" : "color"} mode</span></div>` +
+    `<div class="ptools">${tools.map(([v, l]) => `<button class="ptool${tool === v ? " on" : ""}" data-tool="${v}" title="${l}" style="${v < 0 ? "" : `background:${cellColor(v)};color:${lum(cellColor(v)) > 140 ? "#000" : "#fff"}`}">${bw ? l : v}</button>`).join("")}<button class="ptool${tool === -1 ? " on" : ""}" data-tool="-1" title="Eraser">✕</button></div>` +
+    `<div class="pgrid" style="grid-template-columns:repeat(${S.pW},minmax(0,var(--pc)))">${cells.map((v, i) => `<div class="pcell" data-i="${i}" style="${v < 0 ? "" : "background:" + cellColor(v)}"></div>`).join("")}</div>` +
+    `<div class="row"><button class="primary" id="pSearch">Search</button><button class="secondary" id="pClear">Clear</button></div>` +
+    `<p class="phint muted" id="pHint">Click or drag to paint, right-click to erase. Empty cells ${S.pEmpty === "any" ? "match anything" : "match the background"}. Small shapes are found fastest.</p>`;
 }
 function paintCell(i, v) {
   if (cells[i] === v) return;
@@ -820,13 +844,15 @@ painterEl.addEventListener("pointerdown", event => {
   const cell = event.target.closest("[data-i]");
   if (!cell) return;
   event.preventDefault();
+  const i = Number(cell.dataset.i);
+  dragValue = event.button === 2 || cells[i] === tool ? -1 : tool; // clicking a cell that already has this color clears it
   painting = true;
-  paintCell(Number(cell.dataset.i), event.button === 2 ? -1 : tool);
+  paintCell(i, dragValue);
 });
 painterEl.addEventListener("pointermove", event => {
   if (!painting) return;
   const cell = document.elementFromPoint(event.clientX, event.clientY);
-  if (cell && cell.dataset.i !== undefined && painterEl.contains(cell)) paintCell(Number(cell.dataset.i), (event.buttons & 2) ? -1 : tool);
+  if (cell && cell.dataset.i !== undefined && painterEl.contains(cell)) paintCell(Number(cell.dataset.i), dragValue);
 });
 window.addEventListener("pointerup", () => { painting = false; });
 painterEl.addEventListener("click", event => {

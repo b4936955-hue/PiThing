@@ -1,3 +1,4 @@
+// pi-worker-version: parallel-v4
 "use strict";
 
 const digitTriplets = new Uint8Array(3000);
@@ -8,27 +9,31 @@ for (let value = 0; value < 1000; value++) {
   digitTriplets[offset + 2] = 48 + value % 10;
 }
 
-function toText(bytes) {
-  const pieces = [];
-  for (let offset = 0; offset < bytes.length; offset += 0x8000) {
-    pieces.push(String.fromCharCode(...bytes.subarray(offset, offset + 0x8000)));
-  }
-  return pieces.join("");
-}
+const decoder = new TextDecoder("latin1"); // all our bytes are ASCII, so this is exact and very fast
+function toText(bytes) { return decoder.decode(bytes); }
+const LITTLE_ENDIAN = new Uint8Array(new Uint32Array([1]).buffer)[0] === 1;
 
 function decodePacked(buffer, digitCount) {
-  const packed = new DataView(buffer);
+  const words = LITTLE_ENDIAN ? new Uint32Array(buffer) : null;
+  const view = words ? null : new DataView(buffer);
+  const T = digitTriplets;
   const digits = new Uint8Array(digitCount);
-  for (let block = 0, digitOffset = 0; digitOffset < digitCount; block++, digitOffset += 9) {
-    const value = packed.getUint32(block * 4, true);
-    const first = Math.floor(value / 1_000_000) * 3;
-    const second = Math.floor(value / 1_000) % 1_000 * 3;
-    const third = value % 1_000 * 3;
-    const take = Math.min(9, digitCount - digitOffset);
-    for (let digit = 0; digit < take; digit++) {
-      const group = digit < 3 ? first : digit < 6 ? second : third;
-      digits[digitOffset + digit] = digitTriplets[group + digit % 3];
-    }
+  const full = Math.floor(digitCount / 9);
+  let o = 0;
+  for (let block = 0; block < full; block++, o += 9) {
+    const value = words ? words[block] : view.getUint32(block * 4, true);
+    const a = ((value / 1000000) | 0) * 3;
+    const b = (((value / 1000) | 0) % 1000) * 3;
+    const c = (value % 1000) * 3;
+    digits[o] = T[a]; digits[o + 1] = T[a + 1]; digits[o + 2] = T[a + 2];
+    digits[o + 3] = T[b]; digits[o + 4] = T[b + 1]; digits[o + 5] = T[b + 2];
+    digits[o + 6] = T[c]; digits[o + 7] = T[c + 1]; digits[o + 8] = T[c + 2];
+  }
+  const rest = digitCount - o;
+  if (rest > 0) {
+    const value = words ? words[full] : view.getUint32(full * 4, true);
+    const g = [((value / 1000000) | 0) * 3, (((value / 1000) | 0) % 1000) * 3, (value % 1000) * 3];
+    for (let d = 0; d < rest; d++) digits[o + d] = T[g[(d / 3) | 0] + d % 3];
   }
   return digits;
 }
@@ -83,67 +88,78 @@ function chunkName(index) {
   return `pi-chunk-${String(index).padStart(4, "0")}.bin`;
 }
 
-function binarize(digits, threshold, invert) {
-  const out = new Uint8Array(digits.length);
-  for (let i = 0; i < digits.length; i++) out[i] = ((digits[i] - 48 > threshold) !== invert) ? 98 : 119; // b / w
-  return toText(out);
-}
-
-// Pattern search: "." matches anything. Find the longest literal run, indexOf it natively, verify the rest.
-function makeMatcher(query, wildcard) {
-  if (!wildcard) return (text, from) => text.indexOf(query, from);
-  let best = 0, bestLen = 0;
-  for (let i = 0; i < query.length;) {
-    if (query[i] === ".") { i++; continue; }
-    let j = i;
-    while (j < query.length && query[j] !== ".") j++;
-    if (j - i > bestLen) { bestLen = j - i; best = i; }
-    i = j;
-  }
-  const anchor = query.slice(best, best + bestLen);
-  return (text, from) => {
-    let at = text.indexOf(anchor, from + best);
-    while (at >= 0) {
-      const start = at - best;
-      if (start >= from && start + query.length <= text.length) {
-        let ok = true;
-        for (let k = 0; k < query.length; k++) {
-          const q = query.charCodeAt(k);
-          if (q !== 46 && text.charCodeAt(start + k) !== q) { ok = false; break; }
-        }
-        if (ok) return start;
-      }
-      at = text.indexOf(anchor, at + 1);
-    }
-    return -1;
-  };
+function mapBytes(bytes, table) {
+  const out = new Uint8Array(bytes.length);
+  for (let i = 0; i < bytes.length; i++) out[i] = table[bytes[i]];
+  return out;
 }
 
 self.onmessage = async event => {
-  const { kind, query, baseUrl, digitCount, chunkDigitCount, startChunk, endChunk, minOffset, maxOffset, bw, bwThreshold, bwInvert } = event.data;
+  const { kind, query, baseUrl, digitCount, chunkDigitCount, startChunk, endChunk, minOffset, maxOffset, bw, bwThreshold, bwInvert, prefetch } = event.data;
   try {
     // Offsets are always DIGIT offsets (for letters, the digit where the match's first letter starts).
-    const find = makeMatcher(query, kind === "pattern");
-    let carry = "";          // last query.length-1 symbols of the previous chunk
-    let carryStarts = [];    // letters only: digit offset of each carried letter
-    let leftover = new Uint8Array(0); // letters only: digits not yet tokenized (needs next digit)
+    const qlen = query.length;
+    const wildcard = kind === "pattern" && query.includes(".");
+    const lp = [], lb = [];                       // wildcard patterns: positions and bytes that must match
+    if (wildcard) for (let i = 0; i < qlen; i++) if (query[i] !== ".") { lp.push(i); lb.push(query.charCodeAt(i)); }
+    const n = lp.length, p0 = lp[0], b0 = lb[0];
+    const table = new Uint8Array(256);            // black & white: digit -> "b" (98) or "w" (119)
+    if (bw) for (let d = 0; d < 10; d++) table[48 + d] = ((d > bwThreshold) !== bwInvert) ? 98 : 119;
+    const find = (text, from) => text.indexOf(query, from);
+
+    // Download the next few chunks while the current one is being scanned.
+    const ahead = Math.max(1, (prefetch | 0) || 1);
+    const pending = new Map();
+    const request = index => {
+      if (index >= endChunk || pending.has(index)) return;
+      const promise = (async () => {
+        const response = await fetch(new URL(`data/${chunkName(index)}`, baseUrl));
+        if (!response.ok) throw new Error(`Could not load packed digit chunk ${index + 1} (HTTP ${response.status}).`);
+        return response.arrayBuffer();
+      })();
+      promise.catch(() => {});
+      pending.set(index, promise);
+    };
+
+    let carry = "";                      // last qlen-1 symbols of the previous chunk (text paths)
+    let carryStarts = [];                // letters only: digit offset of each carried letter
+    let carryBytes = new Uint8Array(0);  // wildcard path: same idea, as bytes
+    let leftover = new Uint8Array(0);    // letters only: digits not yet tokenized (needs next digit)
     for (let index = startChunk; index < endChunk; index++) {
+      for (let k = 0; k <= ahead; k++) request(index + k);
+      const buffer = await pending.get(index);
+      pending.delete(index);
       const chunkStart = index * chunkDigitCount;
       const count = Math.min(chunkDigitCount, digitCount - chunkStart);
-      const url = new URL(`data/${chunkName(index)}`, baseUrl);
-      const response = await fetch(url);
-      if (!response.ok) throw new Error(`Could not load packed digit chunk ${index + 1} (HTTP ${response.status}).`);
-      const buffer = await response.arrayBuffer();
       const expectedBytes = Math.ceil(count / 9) * 4;
       if (buffer.byteLength !== expectedBytes) {
         throw new Error(`Packed digit chunk ${index + 1} has ${buffer.byteLength} bytes; expected ${expectedBytes}.`);
       }
-
       const decoded = decodePacked(buffer, count);
       const atEnd = chunkStart + count >= digitCount;
+
+      if (wildcard) {
+        // Tight loop over bytes: cheaper than calling indexOf for every candidate when literals are short.
+        const symbols = bw ? mapBytes(decoded, table) : decoded;
+        const text = carryBytes.length ? joinBytes(carryBytes, symbols) : symbols;
+        const last = text.length - qlen;
+        for (let i = 0; i <= last; i++) {
+          if (text[i + p0] !== b0) continue;
+          let k = 1;
+          while (k < n && text[i + lp[k]] === lb[k]) k++;
+          if (k === n) {
+            const offset = chunkStart - carryBytes.length + i;
+            if (offset >= minOffset && offset < maxOffset) { self.postMessage({ type: "done", offset }); return; }
+          }
+        }
+        carryBytes = text.slice(Math.max(0, text.length - (qlen - 1)));
+        self.postMessage({ type: "progress", chunkIndex: index });
+        continue;
+      }
+
       let segment, segmentStarts = null, base = 0;
       if (kind !== "letter") {
-        segment = kind === "pattern" && bw ? binarize(decoded, bwThreshold, bwInvert) : toText(decoded);
+        segment = kind === "pattern" && bw ? toText(mapBytes(decoded, table)) : toText(decoded);
       } else {
         // The first chunk a worker sees may start mid-token. That is harmless: any 0 or 3-9
         // always ends a token, so the parse is back in sync long before minOffset.
@@ -172,7 +188,7 @@ self.onmessage = async event => {
         matchIndex = find(combined, matchIndex + 1);
       }
 
-      const keep = Math.min(combined.length, Math.max(0, query.length - 1));
+      const keep = Math.min(combined.length, Math.max(0, qlen - 1));
       const from = combined.length - keep;
       if (kind === "letter") {
         carryStarts = [];
