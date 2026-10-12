@@ -119,6 +119,57 @@ input[type="text"] { flex: 1; min-width: 160px; }
     padding: 0 1px;
 }
 
+.pattern-panel {
+    margin-top: 14px;
+    padding-top: 10px;
+    border-top: 1px solid #1c1c20;
+}
+.pattern-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+    font-size: 11px;
+    color: #77777d;
+    text-transform: uppercase;
+    letter-spacing: .04em;
+    margin-bottom: 8px;
+}
+.pattern-grid {
+    display: grid;
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    gap: 6px;
+    width: min(240px, 100%);
+}
+.pattern-cell {
+    aspect-ratio: 1;
+    border: 1px solid #232328;
+    border-radius: 5px;
+    background: #111114;
+    color: #b5b5bc;
+    font-size: 11px;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    min-width: 0;
+}
+.pattern-cell.on {
+    background: #f3f3f3;
+    border-color: #f3f3f3;
+    color: #09090b;
+    box-shadow: inset 0 0 0 1px rgba(0,0,0,.15);
+}
+.pattern-cell.empty {
+    opacity: .18;
+}
+.pattern-helper {
+    margin-top: 8px;
+    font-size: 11px;
+    color: #8a8a92;
+}
+
 .progress-wrap { display: none; align-items: center; gap: 10px; margin-top: 10px; }
 .progress-wrap.visible { display: flex; }
 .progress-bar {
@@ -288,11 +339,29 @@ img.pi-image {
             <input type="number" id="letterOffset" value="0" min="0">
             <span class="label">Length</span>
             <input type="number" id="letterLength" value="120" min="1" max="2000">
+            <span class="label">Mode</span>
+            <select id="letterMode">
+                <option value="color">Color</option>
+                <option value="grayscale">Black &amp; white</option>
+            </select>
             <button class="btn" id="letterBrowseBtn">Go</button>
             <button class="ghost" id="letterRandomBtn">Random</button>
             <button class="ghost" id="letterCopyBtn">Copy</button>
         </div>
         <div class="mono" id="letterDisplay"></div>
+    </div>
+
+    <div class="card">
+        <h2 class="section-title">Letter mask</h2>
+        <p class="section-sub">Select the letters you want to include. The grid is 6x6 and the letters are ordered by frequency in the decoded stream, with C first and N second.</p>
+        <div class="pattern-panel">
+            <div class="pattern-header">
+                <span>Included letters</span>
+                <button class="ghost" id="letterMaskResetBtn" type="button">Reset</button>
+            </div>
+            <div class="pattern-grid" id="letterMaskGrid"></div>
+            <div class="pattern-helper" id="letterMaskSummary">0 of 36 selected</div>
+        </div>
     </div>
 </section>
 
@@ -332,6 +401,14 @@ img.pi-image {
             <input type="number" id="searchImgWidth" value="6" min="2" max="12">
             <span class="label">height</span>
             <input type="number" id="searchImgHeight" value="6" min="2" max="12">
+        </div>
+        <div class="pattern-panel">
+            <div class="pattern-header">
+                <span>Image palette</span>
+                <button class="ghost" id="imageMaskResetBtn" type="button">Reset</button>
+            </div>
+            <div class="pattern-grid" id="imageMaskGrid"></div>
+            <div class="pattern-helper" id="imageMaskSummary">0 of 36 selected</div>
         </div>
         <div class="dropzone" id="dropzone">Click to choose an image, or drop one here</div>
         <input type="file" id="imgFileInput" accept="image/*" style="display:none;">
@@ -443,6 +520,71 @@ function escapeHtml(s) {
     return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
+const LETTER_MASK_VALUES = [
+    "C", "N", "A", "E", "I", "O",
+    "U", "S", "R", "T", "L", "H",
+    "D", "M", "G", "P", "B", "F",
+    "Y", "W", "K", "V", "X", "J",
+    "Q", "Z", "", "", "", "",
+    "", "", "", "", "", ""
+];
+
+const IMAGE_MASK_VALUES = Array.from({ length: 36 }, (_, i) => String((i % 9) + 1));
+
+function getStoredMaskState(storageKey, values, defaultSelected = true) {
+    const fallback = values.map(value => Boolean(value) && defaultSelected);
+    try {
+        const saved = JSON.parse(localStorage.getItem(storageKey) || "null");
+        if (Array.isArray(saved) && saved.length === values.length) {
+            return saved.map((isOn, index) => Boolean(isOn) || !Boolean(values[index]));
+        }
+    } catch {
+        // Ignore invalid or missing local storage values.
+    }
+    return fallback;
+}
+
+function updatePatternCell(cell, isOn, label) {
+    cell.classList.toggle("on", isOn);
+    cell.classList.toggle("empty", !isOn);
+    cell.textContent = label || "";
+    cell.setAttribute("aria-pressed", String(isOn));
+}
+
+function updatePatternSummary(el, state, total) {
+    const selected = state.filter(Boolean).length;
+    el.textContent = `${selected} of ${total} selected`;
+}
+
+function renderPatternGrid({ gridId, summaryId, values, storageKey, defaultSelected = true }) {
+    const grid = document.getElementById(gridId);
+    const summary = document.getElementById(summaryId);
+    if (!grid || !summary) return;
+
+    const state = getStoredMaskState(storageKey, values, defaultSelected);
+    grid.innerHTML = "";
+
+    state.forEach((isOn, index) => {
+        const label = values[index];
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "pattern-cell";
+        btn.title = label || "empty slot";
+        updatePatternCell(btn, isOn, label);
+
+        btn.addEventListener("click", () => {
+            state[index] = !state[index];
+            localStorage.setItem(storageKey, JSON.stringify(state));
+            updatePatternCell(btn, state[index], label);
+            updatePatternSummary(summary, state, values.length);
+        });
+
+        grid.appendChild(btn);
+    });
+
+    updatePatternSummary(summary, state, values.length);
+}
+
 let digitCount = 0;
 let letterCount = 0;
 let palette = [];
@@ -482,10 +624,13 @@ async function loadStatus() {
 
         renderPaletteGrid("paletteGrid");
         renderPaletteGrid("aboutPalette");
+        initSelectionMasks();
     } catch {
         // Status is non-critical for most views.
     }
 }
+
+initSelectionMasks();
 
 function renderPaletteGrid(id) {
     const el = document.getElementById(id);
@@ -803,6 +948,48 @@ document.getElementById("letterRandomBtn").addEventListener("click", async () =>
 document.getElementById("letterCopyBtn").addEventListener("click", () => {
     navigator.clipboard?.writeText(document.getElementById("letterDisplay").textContent).catch(() => {});
 });
+
+function initSelectionMasks() {
+    renderPatternGrid({
+        gridId: "letterMaskGrid",
+        summaryId: "letterMaskSummary",
+        values: LETTER_MASK_VALUES,
+        storageKey: "piLetterMask",
+        defaultSelected: true
+    });
+
+    renderPatternGrid({
+        gridId: "imageMaskGrid",
+        summaryId: "imageMaskSummary",
+        values: IMAGE_MASK_VALUES,
+        storageKey: "piImageMask",
+        defaultSelected: true
+    });
+
+    document.getElementById("letterMaskResetBtn").addEventListener("click", () => {
+        const state = LETTER_MASK_VALUES.map((value, index) => Boolean(value) && true);
+        localStorage.setItem("piLetterMask", JSON.stringify(state));
+        renderPatternGrid({
+            gridId: "letterMaskGrid",
+            summaryId: "letterMaskSummary",
+            values: LETTER_MASK_VALUES,
+            storageKey: "piLetterMask",
+            defaultSelected: true
+        });
+    });
+
+    document.getElementById("imageMaskResetBtn").addEventListener("click", () => {
+        const state = IMAGE_MASK_VALUES.map(() => true);
+        localStorage.setItem("piImageMask", JSON.stringify(state));
+        renderPatternGrid({
+            gridId: "imageMaskGrid",
+            summaryId: "imageMaskSummary",
+            values: IMAGE_MASK_VALUES,
+            storageKey: "piImageMask",
+            defaultSelected: true
+        });
+    });
+}
 
 /*
 ============================================================

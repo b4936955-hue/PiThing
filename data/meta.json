@@ -1,1 +1,11 @@
-{"digitCount":100000001,"chunkSize":9000000,"chunkCount":12,"format":"packed9","note":"pi digits: '3' then the decimals, no dot. 9 digits per big-endian uint32."}
+{
+  "digitCount": 5000,
+  "letterCount": 2500,
+  "format": "packed9",
+  "file": "pi-digits.bin",
+  "sizeBytes": 2224,
+  "builtAt": "2026-10-12T04:25:10.394Z",
+  "sources": [
+    "D:\\PiLibrary\\data\\pi-raw.txt"
+  ]
+}

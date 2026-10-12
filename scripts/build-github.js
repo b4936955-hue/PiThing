@@ -28,6 +28,37 @@ function writeIfChanged(filePath, contents) {
     fs.writeFileSync(filePath, buffer);
 }
 
+function isValidMetadata(metadata) {
+    return metadata !== null &&
+        typeof metadata === "object" &&
+        metadata.format === "packed9-le" &&
+        Number.isSafeInteger(metadata.digitCount) &&
+        metadata.digitCount > 0 &&
+        Number.isSafeInteger(metadata.chunkDigitCount) &&
+        metadata.chunkDigitCount > 0 &&
+        Number.isSafeInteger(metadata.chunkCount) &&
+        metadata.chunkCount === Math.ceil(metadata.digitCount / metadata.chunkDigitCount) &&
+        metadata.pattern === "pi-chunk-{index}.bin";
+}
+
+function expectedChunkBytes(metadata, index) {
+    const digitsInChunk = Math.min(
+        metadata.chunkDigitCount,
+        metadata.digitCount - index * metadata.chunkDigitCount
+    );
+    return Math.ceil(digitsInChunk / DIGITS_PER_BLOCK) * BYTES_PER_BLOCK;
+}
+
+function hasCompleteChunks(directory, metadata) {
+    for (let index = 0; index < metadata.chunkCount; index++) {
+        const filePath = path.join(directory, chunkFileName(index));
+        if (!fs.existsSync(filePath) || fs.statSync(filePath).size !== expectedChunkBytes(metadata, index)) {
+            return false;
+        }
+    }
+    return true;
+}
+
 function publishChunk(index, packed, digitCount) {
     const fileName = chunkFileName(index);
     writeIfChanged(path.join(ROOT_DATA_DIR, fileName), packed);
@@ -160,10 +191,7 @@ function copyPackedSource() {
 
 function copyExistingChunks() {
     const previousMeta = JSON.parse(fs.readFileSync(ROOT_META_PATH, "utf8"));
-    if (previousMeta.format !== "packed9-le" ||
-        !Number.isSafeInteger(previousMeta.digitCount) ||
-        !Number.isSafeInteger(previousMeta.chunkDigitCount) ||
-        !Number.isSafeInteger(previousMeta.chunkCount)) {
+    if (!isValidMetadata(previousMeta)) {
         throw new Error("Cannot rebuild: the packed source and valid previous chunk metadata are both missing.");
     }
 
@@ -172,7 +200,15 @@ function copyExistingChunks() {
         if (!fs.existsSync(sourcePath)) {
             throw new Error(`Cannot rebuild: missing packed chunk ${sourcePath}.`);
         }
-        fs.copyFileSync(sourcePath, path.join(DOCS_DATA_DIR, chunkFileName(index)));
+        if (fs.statSync(sourcePath).size !== expectedChunkBytes(previousMeta, index)) {
+            throw new Error(`Cannot rebuild: packed chunk ${sourcePath} has an unexpected size.`);
+        }
+
+        const docsPath = path.join(DOCS_DATA_DIR, chunkFileName(index));
+        if (!fs.existsSync(docsPath) ||
+            fs.statSync(docsPath).size !== expectedChunkBytes(previousMeta, index)) {
+            fs.copyFileSync(sourcePath, docsPath);
+        }
     }
     return previousMeta;
 }
@@ -193,17 +229,39 @@ function removeStaleGeneratedChunks(chunkCount) {
 }
 
 function main() {
+    const args = process.argv.slice(2);
+    if (args.some(argument => argument !== "--repack")) {
+        throw new Error("Unknown argument. Use --repack to rebuild all chunks from the text source.");
+    }
+    const forceRepack = args.includes("--repack");
+
     fs.mkdirSync(ROOT_DATA_DIR, { recursive: true });
     fs.mkdirSync(DOCS_DATA_DIR, { recursive: true });
 
     let metadata;
-    if (fs.existsSync(TEXT_SOURCE_PATH)) {
+    if (!forceRepack && fs.existsSync(ROOT_META_PATH)) {
+        const previousMeta = JSON.parse(fs.readFileSync(ROOT_META_PATH, "utf8"));
+        if (isValidMetadata(previousMeta)) {
+            const sourceSizeMatches = !fs.existsSync(TEXT_SOURCE_PATH) ||
+                fs.statSync(TEXT_SOURCE_PATH).size + PREFIX_DIGIT_COUNT === previousMeta.digitCount;
+            if (sourceSizeMatches && hasCompleteChunks(ROOT_DATA_DIR, previousMeta)) {
+                console.log(
+                    `Reusing ${previousMeta.chunkCount.toLocaleString()} existing packed chunks; ` +
+                    "skipping the full digit repack."
+                );
+                metadata = copyExistingChunks();
+            }
+        }
+    }
+
+    if (!metadata && fs.existsSync(TEXT_SOURCE_PATH)) {
+        console.log("Packing the pi text source. This can take a while for 10 billion digits...");
         metadata = packTextSource();
-    } else if (fs.existsSync(ROOT_META_PATH)) {
+    } else if (!metadata && fs.existsSync(ROOT_META_PATH)) {
         metadata = copyExistingChunks();
-    } else if (fs.existsSync(PACKED_SOURCE_PATH)) {
+    } else if (!metadata && fs.existsSync(PACKED_SOURCE_PATH)) {
         metadata = copyPackedSource();
-    } else {
+    } else if (!metadata) {
         throw new Error(
             "No pi source found. Add data/first_10_billion_digits_of_pi.txt, " +
             "data/pi-digits.bin, or all packed pi chunks."

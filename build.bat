@@ -8,5 +8,5 @@ if errorlevel 1 (
   exit /b 1
 )
 
-node scripts\build-github.js
+node scripts\build-github.js %*
 exit /b %errorlevel%

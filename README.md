@@ -39,7 +39,13 @@ need to download and scan the complete packed index, so their speed depends
 on the browser's network connection and available CPU cores.
 
 `push.bat` builds the site, merges the latest `master` branch without replacing
-remote files, and pushes the repository configured in that file.
+remote files, and pushes the repository configured in that file. When packed
+chunks already exist, the builder reuses them rather than rereading and
+repacking all 10 billion digits. Use `push.bat --repack` (or
+`npm run build:github -- --repack`) only when you intentionally need to rebuild
+the packed chunks from the text source. The push script reports progress while
+checking and uploading chunk batches; if no chunks changed, it says so before
+the final site push.
 The loader is `loader.html` and is configured for `b4936955-hue/PiThing`.
 After the push, the loader reads the updated root `index.html` from the
 repository. If GitHub Pages is used, select the `master` branch and `/docs`

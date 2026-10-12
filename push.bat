@@ -13,7 +13,8 @@ if errorlevel 1 (
   goto :failed
 )
 
-call build.bat
+echo Building the GitHub site...
+call build.bat %*
 if errorlevel 1 goto :failed
 
 git rev-parse --is-inside-work-tree >nul 2>&1
@@ -53,6 +54,7 @@ git branch --show-current | findstr /x /c:"%BRANCH%" >nul
 if errorlevel 1 git branch -M "%BRANCH%"
 if errorlevel 1 goto :git_error
 
+echo Checking GitHub for newer commits...
 git fetch origin "%BRANCH%"
 if errorlevel 1 (
   echo ERROR: Could not fetch origin/%BRANCH%. Check repository access and branch name.
@@ -69,9 +71,11 @@ if errorlevel 1 (
   )
 )
 
+echo Publishing any new packed pi chunks in resumable batches...
 node scripts\push-chunks.js
 if errorlevel 1 goto :failed
 
+echo Staging and pushing the site changes...
 git add -A
 if errorlevel 1 goto :git_error
 git diff --cached --quiet

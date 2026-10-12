@@ -47,12 +47,15 @@ function main() {
         throw new Error("Could not determine the current Git branch.");
     }
     const branch = branchResult.stdout.trim();
+    console.log(`Checking GitHub branch ${branch} before uploading pi chunks...`);
     if (runGit(["push", "-u", "origin", branch]) !== 0) {
         throw new Error("Could not push the current branch before uploading packed pi chunks.");
     }
 
+    let committedBatches = 0;
     for (let start = 0; start < metadata.chunkCount; start += CHUNKS_PER_PUSH) {
         const end = Math.min(metadata.chunkCount, start + CHUNKS_PER_PUSH);
+        console.log(`Checking packed chunks ${start.toLocaleString()}-${(end - 1).toLocaleString()}...`);
         const paths = [];
         for (let index = start; index < end; index++) {
             const name = `pi-chunk-${String(index).padStart(4, "0")}.bin`;
@@ -82,9 +85,16 @@ function main() {
                     "resolve the Git error and run push.bat again."
                 );
             }
+            committedBatches++;
         } else if (stagedStatus !== 0) {
             throw new Error("Could not inspect staged pi chunk changes.");
         }
+    }
+
+    if (committedBatches === 0) {
+        console.log("All packed pi chunks are already on GitHub; no chunk upload was needed.");
+    } else {
+        console.log(`Uploaded ${committedBatches} packed chunk batch(es) to GitHub.`);
     }
 }
 
