@@ -20,12 +20,12 @@
     (async function () {
       var USER = "b4936955-hue";
       var REPO = "PiThing";
-      var REVISION = "7707caf57bbe53db698d40fa6c5c125b1282331e";
       var sources = [
-        "https://raw.githubusercontent.com/" + USER + "/" + REPO + "/" + REVISION + "/",
-        "https://cdn.jsdelivr.net/gh/" + USER + "/" + REPO + "@" + REVISION + "/",
-        "https://raw.githubusercontent.com/" + USER + "/" + REPO + "/" + REVISION + "/docs/",
-        "https://cdn.jsdelivr.net/gh/" + USER + "/" + REPO + "@" + REVISION + "/docs/"
+        "https://raw.githubusercontent.com/" + USER + "/" + REPO + "/HEAD/",
+        "https://raw.githubusercontent.com/" + USER + "/" + REPO + "/master/",
+        "https://raw.githubusercontent.com/" + USER + "/" + REPO + "/HEAD/docs/",
+        "https://cdn.jsdelivr.net/gh/" + USER + "/" + REPO + "@latest/",
+        "https://cdn.jsdelivr.net/gh/" + USER + "/" + REPO + "@latest/docs/"
       ];
       var status = document.getElementById("status");
       var failures = [];

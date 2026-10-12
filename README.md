@@ -1,6 +1,6 @@
 # The Library of Pi
 
-Search, browse, and view pi as digits, letters, colors, and grayscale —
+Search, browse, and view pi as digits, letters, colors, and black and white —
 same idea as the Library of Babel, but instead of generating random
 noise, it uses pi's digits as the (conjectured normal, so effectively
 infinite-ish) source of "everything."
@@ -162,16 +162,27 @@ number back.
 Long disk-tier or remote searches report live progress and can be
 cancelled mid-scan.
 
-## The letter mapping (a judgment call)
+## The letter mapping
 
-There's no single obvious way to turn 10 digits into 26 letters. This
-app uses: **non-overlapping pairs of digits (00-99), mod 26, → one
-letter A-Z.** It's a genuine continuous decode of the whole digit
-stream (letter #500,000 is a fixed, specific letter), not something
-computed only at search time. If you had a different scheme in mind,
-it's isolated to `pairToLetter()` in `src/piIndex.js` (and mirrored in
-`src/remoteAdapter.js`/`src/remoteSource.js` for remote mode) and easy
-to swap.
+Pi's digits are read as the numbers 1 to 26 (A = 1 ... Z = 26). Two digits are
+taken together when they make 10 to 26, otherwise a single digit stands alone,
+so 3.14159265... reads 3, 14, 15, 9, 26, 5 = **C N O I Z E**. A lone 0 has no
+letter and is skipped. Because a 1 always joins the digit after it, A only
+appears at the very end of the digits.
+
+A number never ends on a 1 or a 2, so the spot right after any 0 or 3-9 is
+always the start of a new number. That lets the page work out the correct
+reading frame from any digit offset, so letters line up with the digits
+underneath wherever you browse. Letter offsets are therefore digit offsets.
+The rule lives in `tokenAt()` in `github/index.html` and `github/search-worker.js`.
+
+## Images
+
+One digit is one pixel. Colors: 0 black, 1 dark blue, 2 blue, 3 light blue,
+4 green, 5 yellow, 6 gold, 7 orange, 8 red, 9 magenta. Black and white mode:
+0-4 black, 5-9 white (no grays). The pattern painter searches for a drawn
+pattern. In black and white mode any digit from 0 to 4 matches a black square
+and any from 5 to 9 a white one.
 
 ## Quality-of-life extras
 
