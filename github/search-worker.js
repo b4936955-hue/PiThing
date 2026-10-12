@@ -83,10 +83,47 @@ function chunkName(index) {
   return `pi-chunk-${String(index).padStart(4, "0")}.bin`;
 }
 
+function binarize(digits, threshold, invert) {
+  const out = new Uint8Array(digits.length);
+  for (let i = 0; i < digits.length; i++) out[i] = ((digits[i] - 48 > threshold) !== invert) ? 98 : 119; // b / w
+  return toText(out);
+}
+
+// Pattern search: "." matches anything. Find the longest literal run, indexOf it natively, verify the rest.
+function makeMatcher(query, wildcard) {
+  if (!wildcard) return (text, from) => text.indexOf(query, from);
+  let best = 0, bestLen = 0;
+  for (let i = 0; i < query.length;) {
+    if (query[i] === ".") { i++; continue; }
+    let j = i;
+    while (j < query.length && query[j] !== ".") j++;
+    if (j - i > bestLen) { bestLen = j - i; best = i; }
+    i = j;
+  }
+  const anchor = query.slice(best, best + bestLen);
+  return (text, from) => {
+    let at = text.indexOf(anchor, from + best);
+    while (at >= 0) {
+      const start = at - best;
+      if (start >= from && start + query.length <= text.length) {
+        let ok = true;
+        for (let k = 0; k < query.length; k++) {
+          const q = query.charCodeAt(k);
+          if (q !== 46 && text.charCodeAt(start + k) !== q) { ok = false; break; }
+        }
+        if (ok) return start;
+      }
+      at = text.indexOf(anchor, at + 1);
+    }
+    return -1;
+  };
+}
+
 self.onmessage = async event => {
-  const { kind, query, baseUrl, digitCount, chunkDigitCount, startChunk, endChunk, minOffset, maxOffset } = event.data;
+  const { kind, query, baseUrl, digitCount, chunkDigitCount, startChunk, endChunk, minOffset, maxOffset, bw, bwThreshold, bwInvert } = event.data;
   try {
     // Offsets are always DIGIT offsets (for letters, the digit where the match's first letter starts).
+    const find = makeMatcher(query, kind === "pattern");
     let carry = "";          // last query.length-1 symbols of the previous chunk
     let carryStarts = [];    // letters only: digit offset of each carried letter
     let leftover = new Uint8Array(0); // letters only: digits not yet tokenized (needs next digit)
@@ -105,8 +142,8 @@ self.onmessage = async event => {
       const decoded = decodePacked(buffer, count);
       const atEnd = chunkStart + count >= digitCount;
       let segment, segmentStarts = null, base = 0;
-      if (kind === "digit") {
-        segment = toText(decoded);
+      if (kind !== "letter") {
+        segment = kind === "pattern" && bw ? binarize(decoded, bwThreshold, bwInvert) : toText(decoded);
       } else {
         // The first chunk a worker sees may start mid-token. That is harmless: any 0 or 3-9
         // always ends a token, so the parse is back in sync long before minOffset.
@@ -125,19 +162,19 @@ self.onmessage = async event => {
         ? previousStarts[position]
         : base + segmentStarts[position - carryLength];
 
-      let matchIndex = combined.indexOf(query);
+      let matchIndex = find(combined, 0);
       while (matchIndex >= 0) {
-        const offset = kind === "digit" ? chunkStart - carryLength + matchIndex : startOf(matchIndex);
+        const offset = kind !== "letter" ? chunkStart - carryLength + matchIndex : startOf(matchIndex);
         if (offset >= minOffset && offset < maxOffset) {
           self.postMessage({ type: "done", offset });
           return;
         }
-        matchIndex = combined.indexOf(query, matchIndex + 1);
+        matchIndex = find(combined, matchIndex + 1);
       }
 
       const keep = Math.min(combined.length, Math.max(0, query.length - 1));
       const from = combined.length - keep;
-      if (kind !== "digit") {
+      if (kind === "letter") {
         carryStarts = [];
         for (let position = from; position < combined.length; position++) carryStarts.push(startOf(position));
       }

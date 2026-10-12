@@ -37,6 +37,24 @@
     canvas { image-rendering: pixelated; max-width: 100%; border: 1px solid #333; margin-top: 10px; }
     .muted { color: #77777d; font-size: 12px; }
     @media (max-width: 520px) { header { align-items: flex-start; flex-direction: column; } nav { width: 100%; } }
+    .srow { display: flex; align-items: center; gap: 10px; margin: 8px 0; font-size: 13px; }
+    .srow > span { flex: 1; }
+    .srow input[type=range] { flex: 1.2; padding: 0; }
+    .srow output { min-width: 46px; text-align: right; color: #92929a; font-size: 12px; }
+    .painter { display: inline-block; margin-top: 14px; padding: 16px; background: #11111f; border: 1px solid #23233a; border-radius: 14px; font-family: "Courier New", monospace; }
+    .ptitle { color: #4b5a8f; font-size: 12px; letter-spacing: .25em; display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 10px; }
+    .pdim { letter-spacing: 0; display: flex; gap: 4px; align-items: center; }
+    .pdim input { width: 54px; padding: 4px 6px; }
+    .ptools { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+    .ptool { min-width: 28px; height: 28px; border: 2px solid transparent; border-radius: 7px; padding: 0 6px; font-size: 11px; font-weight: 700; color: #aab; background: #17172b; }
+    .ptool.on { border-color: #fff; }
+    .pgrid { display: grid; gap: var(--pg); touch-action: none; user-select: none; }
+    .pcell { width: var(--pc); height: var(--pc); background: #17172b; border-radius: 10px; cursor: pointer; }
+    .prow { display: flex; gap: 10px; margin-top: 12px; }
+    .psearch, .pclear { flex: 1; padding: 12px; border-radius: 8px; font: 700 13px "Courier New", monospace; letter-spacing: .15em; }
+    .psearch { background: #f0b43c; color: #2a1f00; border: 0; }
+    .pclear { background: transparent; color: #6f86c8; border: 1px solid #23233a; }
+    .phint { margin-top: 10px; color: #4d5c90; font-size: 12px; letter-spacing: .06em; text-align: center; max-width: 360px; }
   </style>
 </head>
 <body>
@@ -48,6 +66,7 @@
       <button data-view="letters">Letters</button>
       <button data-view="image">Images</button>
       <button data-view="about">About</button>
+      <button data-view="settings">Settings</button>
     </nav>
   </header>
   <p id="loadStatus">Loading the pi digit library…</p>
@@ -96,10 +115,20 @@
     <div class="card">
       <h2>Pi as an image</h2>
       <p>Each digit maps to a color. Browse a patch or upload an image to find its nearest color pattern in pi.</p>
-      <div class="row"><label for="imageOffset">Offset</label><input id="imageOffset" type="number" min="0" value="0"><label for="imageWidth">Width</label><input id="imageWidth" type="number" min="1" max="40" value="20"><label for="imageHeight">Height</label><input id="imageHeight" type="number" min="1" max="40" value="20"><select id="imageMode"><option value="color">Colors</option><option value="grayscale">Grayscale</option></select><button class="primary" id="renderImage">Render</button></div>
+      <div class="row"><label for="imageOffset">Offset</label><input id="imageOffset" type="number" min="0" value="0"><label for="imageWidth">Width</label><input id="imageWidth" type="number" min="1" max="40" value="20"><label for="imageHeight">Height</label><input id="imageHeight" type="number" min="1" max="40" value="20"><select id="imageMode"><option value="color">Colors</option><option value="bw">Black &amp; white</option></select><button class="primary" id="renderImage">Render</button></div>
       <canvas id="imageCanvas"></canvas>
+      <div id="painter" class="painter"></div>
       <div class="row"><input id="imageFile" type="file" accept="image/*"><label for="searchWidth">Pattern width</label><input id="searchWidth" type="number" min="2" max="12" value="4"><label for="searchHeight">Pattern height</label><input id="searchHeight" type="number" min="2" max="12" value="4"><button class="primary" id="searchImage">Find image</button></div>
       <div id="imageResult" class="result" aria-live="polite"></div>
+    </div>
+  </section>
+
+  <section id="settings">
+    <div class="card">
+      <h2>Settings</h2>
+      <p>Saved in this browser. Changes apply immediately.</p>
+      <div id="settingsBody"></div>
+      <div class="row"><button class="secondary" id="resetSettings">Reset all settings</button></div>
     </div>
   </section>
 
@@ -114,7 +143,7 @@
 </main>
 <script>
 "use strict";
-const CONTEXT = 40;
+let CONTEXT = 40;
 const colors = ["#000000", "#ff8c00", "#1fa64a", "#e8112d", "#8a2be2", "#8b5a2b", "#ff69b4", "#808080", "#90ee90", "#1f75fe"];
 const colorNames = ["black", "orange", "green", "red", "purple", "brown", "pink", "gray", "light green", "blue"];
 let digitCount = 0;
@@ -190,7 +219,7 @@ async function getChunk(index) {
   }
   const digits = pieces.join("");
   chunkCache.set(index, digits);
-  if (chunkCache.size > 2) chunkCache.delete(chunkCache.keys().next().value);
+  if (chunkCache.size > S.cacheChunks) chunkCache.delete(chunkCache.keys().next().value);
   return digits;
 }
 async function getDigitsAt(offset, length) {
@@ -256,7 +285,7 @@ async function renderDigits() {
   byId("digitOffset").value = offset;
   byId("digitLength").value = length;
   try {
-    byId("digitDisplay").textContent = await getDigitsAt(offset, length);
+    setDisplay(byId("digitDisplay"), await getDigitsAt(offset, length));
   } catch (error) {
     showError("digitResult", error);
   }
@@ -267,7 +296,7 @@ async function renderLetters() {
   byId("letterOffset").value = offset;
   byId("letterLength").value = length;
   try {
-    byId("letterDisplay").textContent = await getLettersAt(offset, length);
+    setDisplay(byId("letterDisplay"), await getLettersAt(offset, length));
   } catch (error) {
     showError("letterResult", error);
   }
@@ -276,7 +305,7 @@ function addHistory(kind, query) {
   const key = "piHistory:" + kind;
   let items = [];
   try { items = JSON.parse(localStorage.getItem(key) || "[]"); } catch (error) { console.warn("Could not read search history:", error); }
-  items = [query, ...items.filter(item => item !== query)].slice(0, 10);
+  items = [query, ...items.filter(item => item !== query)].slice(0, S.history);
   try { localStorage.setItem(key, JSON.stringify(items)); } catch (error) { console.warn("Could not save search history:", error); }
   renderHistory(kind, items);
 }
@@ -299,7 +328,7 @@ function renderHistory(kind, items) {
     container.append(button);
   }
 }
-async function findMatch(kind, query) {
+async function findMatch(kind, query, extra = {}) {
   if (!searchWorkerUrlPromise) {
     searchWorkerUrlPromise = fetch(new URL("search-worker.js?v=parallel-v3", document.baseURI), { cache: "no-store" })
       .then(response => {
@@ -313,7 +342,7 @@ async function findMatch(kind, query) {
       });
   }
   const workerUrl = await searchWorkerUrlPromise;
-  const workerCount = Math.min(4, chunkCount);
+  const workerCount = Math.min(S.workers, chunkCount);
   const workers = [];
   const jobs = [];
   const completedChunks = new Set();
@@ -344,6 +373,7 @@ async function findMatch(kind, query) {
           worker.postMessage({
             kind,
             query,
+            ...extra,
             baseUrl: document.baseURI,
             digitCount,
             chunkDigitCount,
@@ -441,13 +471,21 @@ async function drawImage(offset, width, height, mode) {
   const canvas = byId("imageCanvas");
   const ctx = canvas.getContext("2d");
   const imageDigits = await getDigitsAt(offset, width * height);
-  canvas.width = width * 12;
-  canvas.height = height * 12;
+  const c = S.cell, size = Math.max(1, c - S.gap);
+  canvas.width = width * c;
+  canvas.height = height * c;
   for (let i = 0; i < width * height; i++) {
     const digit = Number(imageDigits[i] || 0);
-    const gray = Math.round(digit / 9 * 255);
-    ctx.fillStyle = mode === "grayscale" ? `rgb(${gray},${gray},${gray})` : colors[digit];
-    ctx.fillRect((i % width) * 12, Math.floor(i / width) * 12, 12, 12);
+    const fill = mode === "bw" ? (isBlackDigit(digit) ? S.bwBlack : S.bwWhite) : colors[digit];
+    const x = (i % width) * c, y = Math.floor(i / width) * c;
+    ctx.fillStyle = fill;
+    ctx.fillRect(x, y, size, size);
+    if (S.showNumbers && c >= 12) {
+      ctx.font = `${Math.floor(c * 0.55)}px monospace`;
+      ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.fillStyle = lum(fill) > 140 ? "#000" : "#fff";
+      ctx.fillText(String(digit), x + size / 2, y + size / 2 + 1);
+    }
   }
 }
 function nearestDigit(r, g, b) {
@@ -470,8 +508,8 @@ byId("browseDigits").addEventListener("click", renderDigits);
 byId("browseLetters").addEventListener("click", renderLetters);
 byId("randomDigits").addEventListener("click", () => { byId("digitOffset").value = Math.floor(Math.random() * digitCount); renderDigits(); });
 byId("randomLetters").addEventListener("click", () => { byId("letterOffset").value = Math.floor(Math.random() * digitCount); renderLetters(); });
-byId("copyDigits").addEventListener("click", () => navigator.clipboard.writeText(byId("digitDisplay").textContent));
-byId("copyLetters").addEventListener("click", () => navigator.clipboard.writeText(byId("letterDisplay").textContent));
+byId("copyDigits").addEventListener("click", () => navigator.clipboard.writeText(byId("digitDisplay").dataset.raw || ""));
+byId("copyLetters").addEventListener("click", () => navigator.clipboard.writeText(byId("letterDisplay").dataset.raw || ""));
 byId("renderImage").addEventListener("click", () => drawImage(byId("imageOffset").value, byId("imageWidth").value, byId("imageHeight").value, byId("imageMode").value).catch(error => showError("imageResult", error)));
 byId("imageFile").addEventListener("change", event => { imageFile = event.target.files[0] || null; });
 byId("searchImage").addEventListener("click", async () => {
@@ -487,8 +525,12 @@ byId("searchImage").addEventListener("click", async () => {
     ctx.drawImage(image, 0, 0, width, height);
     const pixels = ctx.getImageData(0, 0, width, height).data;
     let pattern = "";
-    for (let i = 0; i < width * height; i++) pattern += nearestDigit(pixels[i * 4], pixels[i * 4 + 1], pixels[i * 4 + 2]);
-    const offset = await findMatch("digit", pattern);
+    const bwMode = byId("imageMode").value === "bw";
+    for (let i = 0; i < width * height; i++) {
+      const r = pixels[i * 4], g = pixels[i * 4 + 1], b = pixels[i * 4 + 2];
+      pattern += bwMode ? ((0.299 * r + 0.587 * g + 0.114 * b) >= 128 ? "w" : "b") : nearestDigit(r, g, b);
+    }
+    const offset = bwMode ? await findMatch("pattern", pattern, bwExtra()) : await findMatch("digit", pattern);
     showResult("imageResult", offset < 0 ? "That color pattern was not found in the available pi digits." : `Nearest color pattern found at digit ${format(offset)}.`);
     if (offset >= 0) {
       byId("imageOffset").value = offset;
@@ -527,13 +569,6 @@ for (const [label, make] of [["MMDDYYYY", (m,d,y) => m+d+y], ["DDMMYYYY", (m,d,y
   });
   byId("dateFormats").append(button);
 }
-colors.forEach((hex, digit) => {
-  const swatch = document.createElement("span");
-  swatch.className = "swatch";
-  swatch.innerHTML = `<span class="dot" style="background:${hex}"></span>${digit} = ${colorNames[digit]}`;
-  byId("palette").append(swatch);
-});
-
 async function boot() {
   try {
     const response = await fetch("data/pi-index-meta.json");
@@ -557,7 +592,7 @@ async function boot() {
     byId("aboutCount").textContent = `Loaded a ${format(digitCount)}-digit packed pi index (read as letters by the 1–26 rule).`;
     await renderDigits();
     await renderLetters();
-    await drawImage(0, 20, 20, "color");
+    await drawImage(0, S.imgW, S.imgH, byId("imageMode").value);
     for (const kind of ["digit", "letter"]) {
       let items = [];
       try { items = JSON.parse(localStorage.getItem("piHistory:" + kind) || "[]"); } catch (error) { console.warn("Could not read search history:", error); }
@@ -568,8 +603,278 @@ async function boot() {
     byId("loadStatus").textContent = error.message;
   }
   const requestedView = location.hash.slice(1);
-  if (["digits", "letters", "image", "about"].includes(requestedView)) setView(requestedView);
+  if (["digits", "letters", "image", "settings", "about"].includes(requestedView)) setView(requestedView);
 }
+// ================= Settings, palette and shape painter =================
+const PALETTES = {
+  spectrum: [["#000000","black"],["#1b2a8f","dark blue"],["#2f6df6","blue"],["#7fd3ff","light blue"],["#2fb34a","green"],["#ffe14a","yellow"],["#e9a820","gold"],["#ff7a1a","orange"],["#e5252a","red"],["#d11fc3","magenta"]],
+  classic: ["#000000", "#ff8c00", "#1fa64a", "#e8112d", "#8a2be2", "#8b5a2b", "#ff69b4", "#808080", "#90ee90", "#1f75fe"].map((hex, i) => [hex, ["black", "orange", "green", "red", "purple", "brown", "pink", "gray", "light green", "blue"][i]])
+};
+const SCHEMA = [
+  ["Appearance", [
+    ["theme", "Theme", "select", "dark", ["dark", "light", "black"]],
+    ["accent", "Button / accent color", "color", "#eeeeee"],
+    ["highlight", "Match highlight color", "color", "#ffcf3a"],
+    ["uiScale", "Interface scale (%)", "num", 100, 60, 220, 5],
+    ["pageWidth", "Page width (px)", "num", 900, 480, 2600, 20],
+    ["baseFont", "Interface text size (px)", "num", 15, 10, 28, 1],
+    ["radius", "Corner roundness (px)", "num", 12, 0, 32, 1],
+    ["cardPad", "Card padding (px)", "num", 18, 4, 48, 1]
+  ]],
+  ["Digits and letters", [
+    ["textSize", "Text size (px)", "num", 15, 8, 48, 1],
+    ["lineHeight", "Line height", "num", 1.8, 1, 3, 0.1],
+    ["letterSpacing", "Letter spacing (px)", "num", 0, 0, 12, 0.5],
+    ["fontFamily", "Font", "select", "Courier New", ["Courier New", "Consolas", "Menlo", "monospace", "Arial", "Georgia"]],
+    ["groupSize", "Group text in blocks of (0 = off)", "num", 0, 0, 20, 1],
+    ["digitLen", "Default digits to show", "num", 120, 1, 2000, 10],
+    ["letterLen", "Default letters to show", "num", 120, 1, 2000, 10],
+    ["context", "Characters of context around a match", "num", 40, 5, 200, 5]
+  ]],
+  ["Search and performance", [
+    ["workers", "Parallel search workers", "num", 4, 1, 16, 1],
+    ["cacheChunks", "Chunks kept in memory", "num", 2, 1, 8, 1],
+    ["history", "Search history length", "num", 10, 0, 50, 1]
+  ]],
+  ["Image", [
+    ["imageMode", "Image mode", "select", "color", ["color", "bw"]],
+    ["imgW", "Default image width", "num", 20, 1, 40, 1],
+    ["imgH", "Default image height", "num", 20, 1, 40, 1],
+    ["cell", "Pixel size (px)", "num", 12, 2, 48, 1],
+    ["gap", "Gap between pixels (px)", "num", 0, 0, 6, 1],
+    ["showNumbers", "Draw the digit on each pixel", "check", false],
+    ["bwThreshold", "Black & white: digits 0 to N are white, the rest black", "num", 4, 0, 8, 1],
+    ["bwInvert", "Black & white: swap black and white", "check", false],
+    ["bwWhite", "White color", "color", "#ffffff"],
+    ["bwBlack", "Black color", "color", "#000000"],
+    ["palette", "Color palette", "select", "spectrum", ["spectrum", "classic", "custom"]],
+    ...PALETTES.spectrum.map(([hex, name], i) => ["c" + i, "Digit " + i + " color", "color", hex])
+  ]],
+  ["Shape painter", [
+    ["pW", "Grid width", "num", 6, 1, 12, 1],
+    ["pH", "Grid height", "num", 6, 1, 12, 1],
+    ["pCell", "Cell size (px)", "num", 56, 20, 100, 2],
+    ["pGap", "Cell gap (px)", "num", 6, 0, 16, 1],
+    ["pEmpty", "Empty cells match", "select", "any", ["any", "background"]]
+  ]]
+];
+const DEFAULTS = {};
+for (const [, items] of SCHEMA) for (const item of items) DEFAULTS[item[0]] = item[3];
+const S = Object.assign({}, DEFAULTS);
+try { Object.assign(S, JSON.parse(localStorage.getItem("piSettings") || "{}")); } catch (error) { console.warn("Could not read settings:", error); }
+const saveSettings = () => { try { localStorage.setItem("piSettings", JSON.stringify(S)); } catch (error) { console.warn("Could not save settings:", error); } };
+const lum = hex => { const n = parseInt(hex.slice(1), 16); return 0.299 * (n >> 16) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255); };
+const isBlackDigit = digit => (digit > S.bwThreshold) !== S.bwInvert;
+const bwExtra = () => ({ bw: true, bwThreshold: S.bwThreshold, bwInvert: S.bwInvert });
+const THEMES = {
+  dark:  { bg: "#09090b", fg: "#eeeeee", card: "#101012", bd: "#222226", inp: "#111114", ibd: "#303036", dig: "#0b0b0e", mut: "#92929a", nbd: "#29292e", nfg: "#c5c5cc" },
+  light: { bg: "#f3f3f6", fg: "#16161a", card: "#ffffff", bd: "#d6d6dd", inp: "#ffffff", ibd: "#c4c4cc", dig: "#f0f0f4", mut: "#5c5c68", nbd: "#cfcfd6", nfg: "#33333b" },
+  black: { bg: "#000000", fg: "#ffffff", card: "#000000", bd: "#2a2a2a", inp: "#000000", ibd: "#3a3a3a", dig: "#000000", mut: "#9a9aa2", nbd: "#333333", nfg: "#dddddd" }
+};
+function setDisplay(el, raw) {
+  el.dataset.raw = raw;
+  el.textContent = S.groupSize > 0 ? raw.replace(new RegExp(`(.{${S.groupSize}})`, "g"), "$1 ").trim() : raw;
+}
+function renderPalette() {
+  const box = byId("palette");
+  box.replaceChildren();
+  colors.forEach((hex, digit) => {
+    const swatch = document.createElement("span");
+    swatch.className = "swatch";
+    swatch.innerHTML = `<span class="dot" style="background:${hex}"></span>${digit} = ${colorNames[digit]}`;
+    box.append(swatch);
+  });
+  for (const [hex, label] of [[S.bwWhite, "white"], [S.bwBlack, "black"]]) {
+    const swatch = document.createElement("span");
+    swatch.className = "swatch";
+    swatch.innerHTML = `<span class="dot" style="background:${hex}"></span>B&amp;W ${label}: digits ${label === "white" === !S.bwInvert ? `0–${S.bwThreshold}` : `${S.bwThreshold + 1}–9`}`;
+    box.append(swatch);
+  }
+}
+function applySettings() {
+  const T = THEMES[S.theme] || THEMES.dark;
+  CONTEXT = S.context;
+  for (let i = 0; i < 10; i++) {
+    colors[i] = S["c" + i];
+    colorNames[i] = PALETTES[S.palette] ? PALETTES[S.palette][i][1] : "color " + i;
+  }
+  let style = byId("dynStyle");
+  if (!style) { style = document.createElement("style"); style.id = "dynStyle"; document.head.append(style); }
+  style.textContent = `
+    :root { color-scheme: ${S.theme === "light" ? "light" : "dark"}; background: ${T.bg}; color: ${T.fg}; font-size: ${S.baseFont}px; }
+    body { background: ${T.bg}; }
+    main { width: min(${S.pageWidth}px, 100%); zoom: ${S.uiScale / 100}; }
+    p, .muted, .srow output { color: ${T.mut}; }
+    nav button, .secondary, .chip { border-color: ${T.nbd}; color: ${T.nfg}; border-radius: ${Math.min(S.radius, 14)}px; }
+    nav button.active, .primary { background: ${S.accent}; border-color: ${S.accent}; color: ${lum(S.accent) > 140 ? "#09090b" : "#ffffff"}; }
+    .card { background: ${T.card}; border-color: ${T.bd}; border-radius: ${S.radius}px; padding: ${S.cardPad}px; }
+    input, select { background: ${T.inp}; border-color: ${T.ibd}; color: ${T.fg}; }
+    input[type=range], input[type=color], input[type=checkbox] { padding: 0; }
+    .digits { font-family: "${S.fontFamily}", monospace; font-size: ${S.textSize}px; line-height: ${S.lineHeight}; letter-spacing: ${S.letterSpacing}px; background: ${T.dig}; border-radius: ${Math.max(0, S.radius - 4)}px; }
+    mark { background: ${S.highlight}; color: ${lum(S.highlight) > 140 ? "#09090b" : "#ffffff"}; }
+    canvas { border-color: ${T.ibd}; }`;
+  renderPalette();
+  buildPainter();
+}
+let refreshTimer;
+function scheduleRefresh() {
+  clearTimeout(refreshTimer);
+  refreshTimer = setTimeout(() => {
+    if (!digitCount) return;
+    renderDigits(); renderLetters();
+    drawImage(byId("imageOffset").value, byId("imageWidth").value, byId("imageHeight").value, byId("imageMode").value).catch(() => {});
+  }, 150);
+}
+function syncControls() {
+  document.querySelectorAll("#settingsBody [data-k]").forEach(input => {
+    const value = S[input.dataset.k];
+    if (input.type === "checkbox") input.checked = value; else input.value = value;
+    if (input.nextElementSibling && input.nextElementSibling.tagName === "OUTPUT") input.nextElementSibling.textContent = value;
+  });
+  byId("imageMode").value = S.imageMode;
+}
+function usePalette(name) { PALETTES[name].forEach(([hex], i) => { S["c" + i] = hex; }); }
+function commit(key) {
+  saveSettings();
+  if (key === "digitLen") byId("digitLength").value = S.digitLen;
+  if (key === "letterLen") byId("letterLength").value = S.letterLen;
+  if (key === "imageMode") { resetCells(); }
+  if (key === "pW" || key === "pH") resetCells();
+  applySettings();
+  scheduleRefresh();
+}
+function buildSettings() {
+  const body = byId("settingsBody");
+  body.replaceChildren();
+  for (const [group, items] of SCHEMA) {
+    const heading = document.createElement("h2");
+    heading.textContent = group;
+    heading.style.marginTop = "20px";
+    body.append(heading);
+    for (const [key, label, type, , a, b, c] of items) {
+      const row = document.createElement("label");
+      row.className = "srow";
+      const text = document.createElement("span");
+      text.textContent = label;
+      let input, output = null;
+      if (type === "select") {
+        input = document.createElement("select");
+        for (const option of a) input.add(new Option(option === "bw" ? "black & white" : option, option));
+      } else {
+        input = document.createElement("input");
+        input.type = type === "num" ? "range" : type === "check" ? "checkbox" : "color";
+        if (type === "num") { input.min = a; input.max = b; input.step = c; output = document.createElement("output"); }
+      }
+      input.dataset.k = key;
+      input.addEventListener("input", () => {
+        S[key] = type === "check" ? input.checked : type === "num" ? Number(input.value) : input.value;
+        if (output) output.textContent = S[key];
+        if (key === "palette" && S.palette !== "custom") usePalette(S.palette);
+        else if (/^c\d$/.test(key)) S.palette = "custom";
+        commit(key);
+        if (key === "palette" || /^c\d$/.test(key)) syncControls();
+      });
+      row.append(text, input);
+      if (output) row.append(output);
+      body.append(row);
+    }
+  }
+  syncControls();
+}
+byId("resetSettings").addEventListener("click", () => {
+  Object.assign(S, DEFAULTS);
+  byId("digitLength").value = S.digitLen;
+  byId("letterLength").value = S.letterLen;
+  resetCells(); syncControls(); saveSettings(); applySettings(); scheduleRefresh();
+});
+byId("imageMode").addEventListener("change", event => { S.imageMode = event.target.value; syncControls(); commit("imageMode"); });
+
+// ----- shape painter: -1 = empty. Color mode: 0-9 = exact digit. Black & white mode: 0 = white, 1 = black -----
+let cells = [], tool = 5, painting = false;
+const isBw = () => byId("imageMode").value === "bw";
+function resetCells() { cells = new Array(S.pW * S.pH).fill(-1); tool = isBw() ? 1 : 5; }
+const cellColor = v => v < 0 ? "" : isBw() ? (v ? S.bwBlack : S.bwWhite) : colors[v];
+function buildPainter() {
+  const el = byId("painter");
+  if (cells.length !== S.pW * S.pH) resetCells();
+  const bw = isBw();
+  const tools = bw ? [[0, "White"], [1, "Black"]] : colors.map((hex, i) => [i, String(i)]);
+  el.style.setProperty("--pc", S.pCell + "px");
+  el.style.setProperty("--pg", S.pGap + "px");
+  el.innerHTML =
+    `<div class="ptitle"><span>DRAW A SHAPE · ${S.pW}×${S.pH}</span><span class="pdim">W <input type="number" id="pWIn" min="1" max="12" value="${S.pW}"> H <input type="number" id="pHIn" min="1" max="12" value="${S.pH}"></span></div>` +
+    `<div class="ptools">${tools.map(([v, l]) => `<button class="ptool${tool === v ? " on" : ""}" data-tool="${v}" title="${l}" style="background:${cellColor(v)};color:${lum(cellColor(v)) > 140 ? "#000" : "#fff"}">${bw ? l : v}</button>`).join("")}<button class="ptool${tool === -1 ? " on" : ""}" data-tool="-1" title="Erase">✕</button></div>` +
+    `<div class="pgrid" style="grid-template-columns:repeat(${S.pW},var(--pc))">${cells.map((v, i) => `<div class="pcell" data-i="${i}" style="background:${cellColor(v)}"></div>`).join("")}</div>` +
+    `<div class="prow"><button class="psearch" id="pSearch">SEARCH</button><button class="pclear" id="pClear">CLEAR</button></div>` +
+    `<div class="phint" id="pHint">click or drag to paint · right-click erases · empty cells ${S.pEmpty === "any" ? "match anything" : "match the background"} · small shapes are found fastest</div>`;
+}
+function paintCell(i, v) {
+  if (cells[i] === v) return;
+  cells[i] = v;
+  const cell = byId("painter").querySelector(`[data-i="${i}"]`);
+  if (cell) cell.style.background = cellColor(v);
+}
+const painterEl = byId("painter");
+painterEl.addEventListener("contextmenu", event => event.preventDefault());
+painterEl.addEventListener("pointerdown", event => {
+  const cell = event.target.closest("[data-i]");
+  if (!cell) return;
+  event.preventDefault();
+  painting = true;
+  paintCell(Number(cell.dataset.i), event.button === 2 ? -1 : tool);
+});
+painterEl.addEventListener("pointermove", event => {
+  if (!painting) return;
+  const cell = document.elementFromPoint(event.clientX, event.clientY);
+  if (cell && cell.dataset.i !== undefined && painterEl.contains(cell)) paintCell(Number(cell.dataset.i), (event.buttons & 2) ? -1 : tool);
+});
+window.addEventListener("pointerup", () => { painting = false; });
+painterEl.addEventListener("click", event => {
+  const toolButton = event.target.closest("[data-tool]");
+  if (toolButton) { tool = Number(toolButton.dataset.tool); buildPainter(); }
+  else if (event.target.id === "pClear") { resetCells(); buildPainter(); }
+  else if (event.target.id === "pSearch") searchShape();
+});
+painterEl.addEventListener("change", event => {
+  if (event.target.id !== "pWIn" && event.target.id !== "pHIn") return;
+  S.pW = clamp(byId("pWIn").value, 1, 12) || 1;
+  S.pH = clamp(byId("pHIn").value, 1, 12) || 1;
+  saveSettings(); resetCells(); buildPainter(); syncControls();
+});
+async function searchShape() {
+  const bw = isBw();
+  const hint = byId("pHint");
+  let query = "";
+  for (const v of cells) query += v < 0 ? (S.pEmpty === "background" ? (bw ? "w" : "0") : ".") : bw ? (v ? "b" : "w") : String(v);
+  if (!/[^.]/.test(query)) { hint.textContent = "Paint at least one cell first."; return; }
+  if (searchInProgress) { hint.textContent = "A search is already running."; return; }
+  searchInProgress = true;
+  hint.textContent = "Searching…";
+  try {
+    const offset = bw || query.includes(".") ? await findMatch("pattern", query, bw ? bwExtra() : {}) : await findMatch("digit", query);
+    if (offset < 0) { hint.textContent = "That shape was not found in the available digits."; return; }
+    byId("imageOffset").value = offset;
+    byId("imageWidth").value = S.pW;
+    byId("imageHeight").value = S.pH;
+    await drawImage(offset, S.pW, S.pH, bw ? "bw" : "color");
+    hint.textContent = `Found at digit offset ${format(offset)}, shown above at width ${S.pW}.`;
+    showResult("imageResult", `Shape found at digit offset ${format(offset)} (position ${format(offset + 1)}).`);
+  } catch (error) {
+    hint.textContent = error.message || String(error);
+  } finally {
+    searchInProgress = false;
+    byId("loadStatus").textContent = `Ready: ${format(digitCount)} digits.`;
+  }
+}
+byId("digitLength").value = S.digitLen;
+byId("letterLength").value = S.letterLen;
+byId("imageWidth").value = S.imgW;
+byId("imageHeight").value = S.imgH;
+byId("imageMode").value = S.imageMode;
+resetCells();
+buildSettings();
+applySettings();
+
 boot();
 </script>
 </body>
