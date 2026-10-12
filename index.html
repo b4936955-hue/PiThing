@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="pi-search-engine" content="parallel-v2">
+  <meta name="pi-search-engine" content="parallel-v3">
   <title>The Library of Pi</title>
   <style>
     :root { color-scheme: dark; font: 15px Arial, sans-serif; background: #09090b; color: #eee; }
@@ -79,7 +79,7 @@
   <section id="letters">
     <div class="card">
       <h2>Search for letters</h2>
-      <p>Pi is decoded in non-overlapping pairs: each pair of digits modulo 26 becomes A–Z.</p>
+      <p>Pi's digits are read as the numbers 1–26 (A=1 … Z=26). Two digits are taken together when they make 10–26, otherwise one digit stands alone; a lone 0 has no letter. So 3.14159265… reads 3, 14, 15, 9, 26, 5 = C N O I Z E. Letter offsets are digit offsets.</p>
       <div class="row"><input id="letterQuery" type="text" maxlength="100" placeholder="e.g. HELLO"><button class="primary" id="searchLetters">Search</button></div>
       <div id="letterResult" class="result" aria-live="polite"></div>
       <div id="letterContext" class="digits" hidden></div>
@@ -87,7 +87,7 @@
     </div>
     <div class="card">
       <h2>Browse letters</h2>
-      <div class="row"><label for="letterOffset">Letter offset</label><input id="letterOffset" type="number" min="0" value="0"><label for="letterLength">Length</label><input id="letterLength" type="number" min="1" max="2000" value="120"><button class="primary" id="browseLetters">Browse</button><button class="secondary" id="randomLetters">Random</button><button class="secondary" id="copyLetters">Copy</button></div>
+      <div class="row"><label for="letterOffset">Start at digit</label><input id="letterOffset" type="number" min="0" value="0"><label for="letterLength">Length</label><input id="letterLength" type="number" min="1" max="2000" value="120"><button class="primary" id="browseLetters">Browse</button><button class="secondary" id="randomLetters">Random</button><button class="secondary" id="copyLetters">Copy</button></div>
       <div id="letterDisplay" class="digits"></div>
     </div>
   </section>
@@ -138,11 +138,23 @@ function showResult(id, message, isError) {
   el.classList.toggle("error", Boolean(isError));
   el.textContent = message;
 }
-function letterFor(pair) { return String.fromCharCode(65 + (Number(pair) % 26)); }
-function makeLetters(source) {
-  let result = "";
-  for (let i = 0; i + 1 < source.length; i += 2) result += letterFor(source.slice(i, i + 2));
-  return result;
+// Letter rule: read digits as numbers 1-26 (A=1 ... Z=26). Take two digits together
+// when they make 10-26, otherwise one digit alone. A lone 0 has no letter.
+// Returns the token width (1 or 2), or 0 if the next digit is needed but not loaded yet.
+// The token's number is left in tokenValue (0 means "no letter").
+let tokenValue = 0;
+function tokenAt(text, i, atEnd) {
+  const d = text.charCodeAt(i) - 48;
+  if (d === 0 || d >= 3) { tokenValue = d; return 1; }
+  if (i + 1 >= text.length) {
+    if (!atEnd) return 0;
+    tokenValue = d;
+    return 1;
+  }
+  const pair = d * 10 + text.charCodeAt(i + 1) - 48;
+  if (pair <= 26) { tokenValue = pair; return 2; }
+  tokenValue = d;
+  return 1;
 }
 function chunkName(index) { return `pi-chunk-${String(index).padStart(4, "0")}.bin`; }
 function expectedChunkDigits(index) { return Math.min(chunkDigitCount, digitCount - index * chunkDigitCount); }
@@ -196,8 +208,38 @@ async function getDigitsAt(offset, length) {
   }
   return result;
 }
+// First `length` letters whose first digit is at or after digit `offset`.
+// Returns { letters, starts } where starts[k] is the digit offset where letter k begins.
+async function getLetterTokens(offset, length) {
+  const lo = Math.max(0, offset - 64);
+  let windowLength = (offset - lo) + length * 2 + 16;
+  for (;;) {
+    const text = await getDigitsAt(lo, windowLength);
+    const atEnd = lo + text.length >= digitCount;
+    // Find the reading frame: the digit after any 0 or 3-9 always starts a new number.
+    let i = 0;
+    if (lo > 0) {
+      let j = offset - lo - 1;
+      while (j >= 0 && text[j] !== "0" && text[j] < "3") j--;
+      i = j + 1;
+    }
+    const letters = [];
+    const starts = [];
+    while (i < text.length && letters.length < length) {
+      const width = tokenAt(text, i, atEnd);
+      if (width === 0) break;
+      if (tokenValue > 0 && lo + i >= offset) {
+        letters.push(String.fromCharCode(64 + tokenValue));
+        starts.push(lo + i);
+      }
+      i += width;
+    }
+    if (letters.length >= length || atEnd) return { letters: letters.join(""), starts };
+    windowLength *= 2;
+  }
+}
 async function getLettersAt(offset, length) {
-  return makeLetters(await getDigitsAt(offset * 2, length * 2));
+  return (await getLetterTokens(offset, length)).letters;
 }
 function renderContext(id, text, offset, query) {
   const start = Math.max(0, offset - CONTEXT);
@@ -220,7 +262,7 @@ async function renderDigits() {
   }
 }
 async function renderLetters() {
-  const offset = clamp(byId("letterOffset").value, 0, Math.floor(digitCount / 2));
+  const offset = clamp(byId("letterOffset").value, 0, digitCount - 1);
   const length = clamp(byId("letterLength").value, 1, 2000);
   byId("letterOffset").value = offset;
   byId("letterLength").value = length;
@@ -259,7 +301,7 @@ function renderHistory(kind, items) {
 }
 async function findMatch(kind, query) {
   if (!searchWorkerUrlPromise) {
-    searchWorkerUrlPromise = fetch(new URL("search-worker.js?v=parallel-v2", document.baseURI), { cache: "no-store" })
+    searchWorkerUrlPromise = fetch(new URL("search-worker.js?v=parallel-v3", document.baseURI), { cache: "no-store" })
       .then(response => {
         if (!response.ok) throw new Error(`Could not load the parallel search worker (HTTP ${response.status}).`);
         return response.text();
@@ -280,10 +322,10 @@ async function findMatch(kind, query) {
     for (let workerIndex = 0; workerIndex < workerCount; workerIndex++) {
       const worker = new Worker(workerUrl);
       workers.push(worker);
-      const unitsPerChunk = kind === "digit" ? chunkDigitCount : chunkDigitCount / 2;
+      const unitsPerChunk = chunkDigitCount;
       const startChunk = Math.floor(chunkCount * workerIndex / workerCount);
       const endChunk = Math.floor(chunkCount * (workerIndex + 1) / workerCount);
-      const totalUnits = kind === "digit" ? digitCount : Math.floor(digitCount / 2);
+      const totalUnits = digitCount;
       jobs.push(new Promise(resolve => {
         worker.onmessage = event => {
           const message = event.data;
@@ -356,25 +398,29 @@ async function search(kind, value) {
     }
     byId(contextId).hidden = true;
     if (offset < 0) {
-      showResult(resultId, `Not found in the ${format(kind === "digit" ? digitCount : Math.floor(digitCount / 2))} available ${kind === "digit" ? "digits" : "letters"}.`, true);
+      showResult(resultId, `Not found in the ${format(digitCount)} available digits${kind === "digit" ? "" : " (read as letters)"}.`, true);
       byId("loadStatus").textContent = `Search complete: scanned ${format(digitCount)} digits.`;
       return;
     }
-    showResult(resultId, `Found at ${kind === "digit" ? "digit" : "letter"} offset ${format(offset)} (position ${format(offset + 1)}).`);
-    const contextStart = Math.max(0, offset - CONTEXT);
-    const beforeLength = offset - contextStart;
+    showResult(resultId, `Found at digit offset ${format(offset)} (position ${format(offset + 1)}).`);
+    const contextStart = Math.max(0, offset - CONTEXT * 2);
     let context;
+    let beforeLength = offset - contextStart;
     try {
-      context = kind === "digit"
-        ? await getDigitsAt(contextStart, beforeLength + query.length + CONTEXT)
-        : await getLettersAt(contextStart, beforeLength + query.length + CONTEXT);
+      if (kind === "digit") {
+        context = await getDigitsAt(contextStart, beforeLength + query.length + CONTEXT);
+      } else {
+        const tokens = await getLetterTokens(contextStart, CONTEXT * 2 + query.length + CONTEXT);
+        context = tokens.letters;
+        beforeLength = Math.max(0, tokens.starts.indexOf(offset));
+      }
     } catch (error) {
       showError(resultId, error);
       byId("loadStatus").textContent = "Could not load match context.";
       return;
     }
     renderContext(contextId, context, beforeLength, query);
-    byId("loadStatus").textContent = `Ready: ${format(digitCount)} digits and ${format(Math.floor(digitCount / 2))} letters.`;
+    byId("loadStatus").textContent = `Ready: ${format(digitCount)} digits.`;
     addHistory(kind, query);
   } catch (error) {
     showError(resultId, error);
@@ -423,7 +469,7 @@ byId("letterQuery").addEventListener("keydown", event => { if (event.key === "En
 byId("browseDigits").addEventListener("click", renderDigits);
 byId("browseLetters").addEventListener("click", renderLetters);
 byId("randomDigits").addEventListener("click", () => { byId("digitOffset").value = Math.floor(Math.random() * digitCount); renderDigits(); });
-byId("randomLetters").addEventListener("click", () => { byId("letterOffset").value = Math.floor(Math.random() * Math.floor(digitCount / 2)); renderLetters(); });
+byId("randomLetters").addEventListener("click", () => { byId("letterOffset").value = Math.floor(Math.random() * digitCount); renderLetters(); });
 byId("copyDigits").addEventListener("click", () => navigator.clipboard.writeText(byId("digitDisplay").textContent));
 byId("copyLetters").addEventListener("click", () => navigator.clipboard.writeText(byId("letterDisplay").textContent));
 byId("renderImage").addEventListener("click", () => drawImage(byId("imageOffset").value, byId("imageWidth").value, byId("imageHeight").value, byId("imageMode").value).catch(error => showError("imageResult", error)));
@@ -507,8 +553,8 @@ async function boot() {
     }
     const firstChunk = await getChunk(0);
     if (!firstChunk.startsWith("3")) throw new Error("The packed pi index must start with the leading digit 3.");
-    byId("loadStatus").textContent = `Ready: ${format(digitCount)} digits and ${format(Math.floor(digitCount / 2))} letters. Chunks load as needed.`;
-    byId("aboutCount").textContent = `Loaded a ${format(digitCount)}-digit packed pi index (${format(Math.floor(digitCount / 2))} decoded letters).`;
+    byId("loadStatus").textContent = `Ready: ${format(digitCount)} digits. Chunks load as needed.`;
+    byId("aboutCount").textContent = `Loaded a ${format(digitCount)}-digit packed pi index (read as letters by the 1–26 rule).`;
     await renderDigits();
     await renderLetters();
     await drawImage(0, 20, 20, "color");
