@@ -1,4 +1,4 @@
-// pi-worker-version: parallel-v5
+// pi-worker-version: parallel-v6
 "use strict";
 
 const digitTriplets = new Uint8Array(3000);
@@ -84,6 +84,31 @@ function joinBytes(a, b) {
   return out;
 }
 
+// Fetch one chunk, giving up on a hung connection after 60 s and retrying a few times.
+async function fetchChunk(index, url, signal) {
+  let lastError = "unknown error";
+  for (let attempt = 0; attempt < 4; attempt++) {
+    if (signal.aborted) throw new Error("Search stopped.");
+    const attemptAbort = new AbortController();
+    const forward = () => attemptAbort.abort();
+    signal.addEventListener("abort", forward, { once: true });
+    const timer = setTimeout(() => attemptAbort.abort(), 60000);
+    try {
+      const response = await fetch(url, { signal: attemptAbort.signal });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      return await response.arrayBuffer();
+    } catch (error) {
+      if (signal.aborted) throw error;
+      lastError = attemptAbort.signal.aborted ? "timed out" : (error.message || String(error));
+      await new Promise(resolve => setTimeout(resolve, 400 * (attempt + 1)));
+    } finally {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", forward);
+    }
+  }
+  throw new Error(`Could not load packed digit chunk ${index + 1} (${lastError}).`);
+}
+
 function chunkName(index) {
   return `pi-chunk-${String(index).padStart(4, "0")}.bin`;
 }
@@ -96,6 +121,7 @@ function mapBytes(bytes, table) {
 
 self.onmessage = async event => {
   const { kind, query, baseUrl, digitCount, chunkDigitCount, startChunk, endChunk, minOffset, maxOffset, bw, bwThreshold, bwInvert, prefetch } = event.data;
+  const jobAbort = new AbortController();   // cancels downloads still in flight when this job ends
   try {
     // Offsets are always DIGIT offsets (for letters, the digit where the match's first letter starts).
     const qlen = query.length;
@@ -112,11 +138,7 @@ self.onmessage = async event => {
     const pending = new Map();
     const request = index => {
       if (index >= endChunk || pending.has(index)) return;
-      const promise = (async () => {
-        const response = await fetch(new URL(`data/${chunkName(index)}`, baseUrl));
-        if (!response.ok) throw new Error(`Could not load packed digit chunk ${index + 1} (HTTP ${response.status}).`);
-        return response.arrayBuffer();
-      })();
+      const promise = fetchChunk(index, new URL(`data/${chunkName(index)}`, baseUrl), jobAbort.signal);
       promise.catch(() => {});
       pending.set(index, promise);
     };
@@ -200,5 +222,7 @@ self.onmessage = async event => {
     self.postMessage({ type: "done", offset: -1 });
   } catch (error) {
     self.postMessage({ type: "error", message: error.message || String(error) });
+  } finally {
+    jobAbort.abort();
   }
 };

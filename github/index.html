@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="pi-search-engine" content="parallel-v5">
+  <meta name="pi-search-engine" content="parallel-v6">
   <title>The Library of Pi</title>
   <style>
     :root { color-scheme: dark; font: 15px Arial, sans-serif; background: #09090b; color: #eee; }
@@ -157,23 +157,91 @@ const format = value => Number(value).toLocaleString();
 const clamp = (value, low, high) => Math.min(high, Math.max(low, Math.floor(Number(value) || 0)));
 const LARGE_SEARCH_DIGIT_THRESHOLD = 2_000_000_000;
 function formatDuration(seconds) {
-  if (seconds < 60) return "less than a minute";
-  const minutes = Math.max(1, Math.round(seconds / 60));
-  return `about ${format(minutes)} minute${minutes === 1 ? "" : "s"}`;
+  if (!isFinite(seconds)) return "a very long time";
+  if (seconds < 5) return "a few seconds";
+  if (seconds < 60) return `about ${Math.round(seconds)} seconds`;
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 120) return `about ${format(minutes)} minute${minutes === 1 ? "" : "s"}`;
+  return `about ${+(seconds / 3600).toFixed(1)} hours`;
 }
-async function confirmLargeSearch() {
+function formatBig(n) {
+  if (!isFinite(n)) return "more than the available";
+  if (n >= 1e9) return `${+(n / 1e9).toFixed(1)} billion`;
+  if (n >= 1e6) return `${+(n / 1e6).toFixed(n >= 1e8 ? 0 : 1)} million`;
+  return format(Math.round(n));
+}
+// Stationary behaviour of the letter parser on random digits: per-letter probability (A..Z) and digits per letter.
+let letterStats;
+function getLetterStats() {
+  if (letterStats) return letterStats;
+  let pi = new Array(10).fill(0.1);            // distribution of the digit a token starts on
+  for (let iter = 0; iter < 300; iter++) {
+    const next = new Array(10).fill(0);
+    let fresh = 0;                              // probability the next token starts on an unseen digit
+    for (let d = 0; d < 10; d++) {
+      const p = pi[d];
+      if (d === 0 || d >= 3) { fresh += p; continue; }
+      for (let e = 0; e < 10; e++) {
+        if (d * 10 + e <= 26) fresh += p * 0.1;
+        else next[e] += p * 0.1;                // single digit taken, but the peeked digit e starts the next token
+      }
+    }
+    for (let e = 0; e < 10; e++) next[e] += fresh * 0.1;
+    pi = next;
+  }
+  const q = new Array(27).fill(0);
+  let meanWidth = 0;
+  for (let d = 0; d < 10; d++) {
+    const p = pi[d];
+    if (d === 0) { meanWidth += p; continue; }
+    if (d >= 3) { q[d] += p; meanWidth += p; continue; }
+    for (let e = 0; e < 10; e++) {
+      if (d * 10 + e <= 26) { q[d * 10 + e] += p * 0.1; meanWidth += p * 0.2; }
+      else { q[d] += p * 0.1; meanWidth += p * 0.1; }
+    }
+  }
+  const total = q.reduce((a, b) => a + b, 0);
+  letterStats = { q: q.map(x => x / total), digitsPerLetter: meanWidth / total };
+  return letterStats;
+}
+// Roughly how many digits you must scan before the first match (about 1 / chance-per-position).
+function estimateSearch(kind, query, extra = {}) {
+  let p = 1, raw;
+  if (kind === "letter") {
+    const stats = getLetterStats();
+    for (const ch of query) p *= stats.q[ch.charCodeAt(0) - 64] || 0;
+    raw = p > 0 ? stats.digitsPerLetter / p : Infinity;
+  } else {
+    let pBlack = 0;
+    if (extra.bw) for (let d = 0; d < 10; d++) if ((d > extra.bwThreshold) !== Boolean(extra.bwInvert)) pBlack += 0.1;
+    for (const ch of query) {
+      if (ch === ".") continue;
+      p *= extra.bw ? (ch === "b" ? pBlack : ch === "w" ? 1 - pBlack : 0) : 0.1;
+    }
+    raw = p > 0 ? 1 / p : Infinity;
+  }
+  return { expected: raw, chance: isFinite(raw) ? 1 - Math.exp(-digitCount / raw) : 0 };
+}
+const QUICK_SEARCH_DIGITS = 500_000_000;      // searches that are very likely under this skip the confirmation
+async function confirmLargeSearch(kind, query, extra = {}) {
   if (digitCount <= LARGE_SEARCH_DIGIT_THRESHOLD) return true;
+  const est = estimateSearch(kind, query, extra);
+  const typical = Math.min(est.expected, digitCount);
+  const unlucky = Math.min(est.expected * 3, digitCount);   // ~95% of searches finish within 3x the average
+  if (unlucky <= QUICK_SEARCH_DIGITS) return true;
   if (navigator.onLine === false) throw new Error("Your browser reports that it is offline. Reconnect before searching.");
 
   const controller = new AbortController();
   activeSearchController = controller;
   byId("cancelSearch").disabled = false;
   byId("loadStatus").textContent = "Checking your connection to the pi data…";
-  const probeIndices = [...new Set([1, Math.min(2, chunkCount - 1)])];
+  // Download several chunks at once (like the real search does) so one slow handshake doesn't skew the speed.
+  const probeCount = Math.max(1, Math.min(speedParams().workers, chunkCount - 1));
+  const probeIndices = Array.from({ length: probeCount }, (_, i) => Math.min(i + 1, chunkCount - 1));
   const startedAt = performance.now();
   let downloadedBytes = 0;
   try {
-    const responses = await Promise.all(probeIndices.map(async index => {
+    const sizes = await Promise.all(probeIndices.map(async index => {
       const response = await fetch(new URL(`data/pi-chunk-${String(index).padStart(4, "0")}.bin`, document.baseURI), {
         cache: "no-store",
         signal: controller.signal
@@ -187,7 +255,7 @@ async function confirmLargeSearch() {
       }
       return bytes.byteLength;
     }));
-    downloadedBytes = responses.reduce((total, size) => total + size, 0);
+    downloadedBytes = sizes.reduce((total, size) => total + size, 0);
   } catch (error) {
     if (error.name === "AbortError") return false;
     throw new Error(`Couldn't check the pi data connection: ${error.message} Check your connection and try again.`);
@@ -196,18 +264,25 @@ async function confirmLargeSearch() {
     byId("cancelSearch").disabled = true;
   }
 
-  const elapsedSeconds = Math.max((performance.now() - startedAt) / 1000, 0.1);
+  const elapsedSeconds = Math.max((performance.now() - startedAt) / 1000, 0.05);
   const mebibytesPerSecond = downloadedBytes / elapsedSeconds / (1024 * 1024);
-  const datasetBytes = Math.ceil(digitCount / 9) * 4;
-  const estimatedSeconds = datasetBytes / (mebibytesPerSecond * 1024 * 1024);
-  byId("loadStatus").textContent =
-    `Connection check: ${mebibytesPerSecond.toFixed(1)} MiB/s. Checking the full index would take ` +
-    `${formatDuration(estimatedSeconds)} to download; scanning adds more time.`;
-  return window.confirm(
-    `This search may scan up to ${format(digitCount)} digits. Your current connection checked at ` +
-    `${mebibytesPerSecond.toFixed(1)} MiB/s, which means downloading the full index alone could take ` +
-    `${formatDuration(estimatedSeconds)}. Scanning adds more time, and a match may be found sooner. Continue?`
-  );
+  const digitsPerSecond = mebibytesPerSecond * 1024 * 1024 / 4 * 9;
+  const timeFor = digits => formatDuration(digits / digitsPerSecond);
+  const label = query.length > 24 ? `${query.slice(0, 24)}…` : query;
+  let text = "";
+  if (est.chance < 0.95) {
+    text += est.chance < 0.01
+      ? `"${label}" almost certainly doesn't appear in the ${format(digitCount)} available digits. `
+      : `"${label}" is rare: only about a ${Math.round(est.chance * 100)}% chance it appears in the ${format(digitCount)} available digits. `;
+    text += `Scanning all of them would take ${timeFor(digitCount)}. `;
+  } else {
+    text += `Searching for "${label}": you'll typically need to scan about ${formatBig(typical)} digits ` +
+      `(an unlucky search could need ${formatBig(unlucky)}). `;
+    text += `At ${mebibytesPerSecond.toFixed(1)} MiB/s that's ${timeFor(typical)} on average, up to ${timeFor(unlucky)} if unlucky. `;
+  }
+  text += "A match can show up much sooner. Continue?";
+  byId("loadStatus").textContent = `Connection check: ${mebibytesPerSecond.toFixed(1)} MiB/s.`;
+  return window.confirm(text);
 }
 function showError(id, error) {
   const el = byId(id);
@@ -387,13 +462,13 @@ async function findMatch(kind, query, extra = {}) {
   byId("cancelSearch").disabled = false;
   byId("loadStatus").textContent = "Preparing parallel search…";
   if (!searchWorkerUrlPromise) {
-    searchWorkerUrlPromise = fetch(new URL("search-worker.js?v=parallel-v5", document.baseURI), { cache: "no-store", signal })
+    searchWorkerUrlPromise = fetch(new URL("search-worker.js?v=parallel-v6", document.baseURI), { cache: "no-store", signal })
       .then(response => {
         if (!response.ok) throw new Error(`Could not load the parallel search worker (HTTP ${response.status}).`);
         return response.text();
       })
       .then(source => {
-        if (!source.includes("pi-worker-version: parallel-v5")) throw new Error("search-worker.js on the server is out of date (it has no shape/pattern search). Run build.bat and push.bat, then hard refresh with Ctrl+F5.");
+        if (!source.includes("pi-worker-version: parallel-v6")) throw new Error("search-worker.js on the server is out of date. Run build.bat and push.bat, then hard refresh with Ctrl+F5.");
         return URL.createObjectURL(new Blob([source], { type: "text/javascript" }));
       })
       .catch(error => {
@@ -402,87 +477,107 @@ async function findMatch(kind, query, extra = {}) {
       });
   }
   const workers = [];
-  const cancelResolvers = [];
-  const cancelWorkers = () => {
-    workers.forEach(worker => worker.terminate());
-    cancelResolvers.forEach(resolve => resolve({ cancelled: true }));
-  };
+  const cancelWorkers = () => workers.forEach(worker => worker.terminate());
   signal.addEventListener("abort", cancelWorkers, { once: true });
   try {
-  const workerUrl = await searchWorkerUrlPromise;
-  if (signal.aborted) throw new DOMException("Search cancelled.", "AbortError");
-  const workerCount = Math.min(speedParams().workers, chunkCount);
-  const jobs = [];
-  const completedChunks = new Set();
-  const startedAt = Date.now();
+    const workerUrl = await searchWorkerUrlPromise;
+    if (signal.aborted) throw new DOMException("Search cancelled.", "AbortError");
+    const params = speedParams();
+    const workerCount = Math.max(1, Math.min(params.workers, chunkCount));
+    // Work is handed out in order, a few chunks at a time, so every worker is always scanning the
+    // EARLIEST unscanned part of pi. (Before, each worker got its own slice of the whole file, so a match
+    // near the start was found by one worker while the others scanned far-away digits for nothing.)
+    const blockSize = Math.max(2, Math.min(16, Math.ceil(chunkCount / (workerCount * 16))));
+    const blockCount = Math.ceil(chunkCount / blockSize);
+    const leadChunks = kind === "letter" ? 1 : 0;      // letters need a chunk of run-up to sync the tokenizer
+    const expected = Math.min(estimateSearch(kind, query, extra).expected, digitCount);
 
-    for (let workerIndex = 0; workerIndex < workerCount; workerIndex++) {
-      const worker = new Worker(workerUrl);
-      workers.push(worker);
-      const unitsPerChunk = chunkDigitCount;
-      const startChunk = Math.floor(chunkCount * workerIndex / workerCount);
-      const endChunk = Math.floor(chunkCount * (workerIndex + 1) / workerCount);
-      const totalUnits = digitCount;
-      jobs.push(new Promise(resolve => {
-        cancelResolvers.push(resolve);
-        worker.onmessage = event => {
-          const message = event.data;
-          if (message.type === "progress") {
-            completedChunks.add(message.chunkIndex);
-            const fraction = Math.min(1, completedChunks.size * chunkDigitCount / digitCount);
-            const elapsedSeconds = (Date.now() - startedAt) / 1000;
-            const remainingSeconds = fraction > 0 && fraction < 1
-              ? elapsedSeconds * (1 - fraction) / fraction
-              : 0;
-            byId("loadStatus").textContent =
-              `Searching ${format(Math.min(completedChunks.size * chunkDigitCount, digitCount))} of ${format(digitCount)} digits` +
-              `${remainingSeconds ? ` (~${formatDuration(remainingSeconds)} left)` : ""} (${workerCount} workers)…`;
-          } else if (message.type === "done") {
-            resolve({ offset: message.offset });
-          } else if (message.type === "error") {
-            resolve({ error: new Error(message.message) });
-          }
-        };
-        worker.onerror = event => resolve({ error: new Error(event.message || "The parallel search worker failed.") });
+    return await new Promise((resolve, reject) => {
+      let settled = false;
+      const finish = (fn, value) => { if (!settled) { settled = true; fn(value); } };
+      signal.addEventListener("abort", () => finish(reject, new DOMException("Search cancelled.", "AbortError")), { once: true });
+
+      const blockDone = new Uint8Array(blockCount);
+      const blockOffset = new Array(blockCount).fill(-1);
+      const chunkDone = new Uint8Array(chunkCount);
+      let nextBlock = 0, bestBlock = Infinity, doneChunks = 0, prefix = 0;
+      const startedAt = Date.now();
+
+      const report = () => {
+        while (prefix < chunkCount && chunkDone[prefix]) prefix++;
+        const scanned = Math.min(digitCount, prefix * chunkDigitCount);
+        const seconds = Math.max((Date.now() - startedAt) / 1000, 0.001);
+        const rate = doneChunks * chunkDigitCount / seconds;
+        let text = `Searched ${format(scanned)} digits in order (${workerCount} workers`;
+        if (rate > 0) text += `, ~${formatBig(rate)} digits/s`;
+        text += ")";
+        if (rate > 0 && scanned < expected) text += ` · usually found by ~${formatBig(expected)} digits, about ${formatDuration((expected - scanned) / rate)} away`;
+        else if (rate > 0) text += ` · past the usual point; worst case ${formatDuration((digitCount - scanned) / rate)} to scan everything`;
+        byId("loadStatus").textContent = `${text}…`;
+      };
+      // The answer is final once every block before the earliest matching block has finished.
+      const check = () => {
+        let low = 0;
+        while (low < blockCount && blockDone[low]) low++;
+        if (bestBlock < low) finish(resolve, blockOffset[bestBlock]);
+        else if (low === blockCount) finish(resolve, -1);
+      };
+      const assign = worker => {
+        if (settled) return;
+        if (nextBlock >= blockCount || nextBlock > bestBlock) { check(); return; }
+        const block = nextBlock++;
+        worker.block = block;
+        const start = block * blockSize;
+        const end = Math.min(chunkCount, start + blockSize);
         try {
           worker.postMessage({
             kind,
             query,
             ...extra,
-            prefetch: speedParams().prefetch,
+            prefetch: params.prefetch,
             baseUrl: document.baseURI,
             digitCount,
             chunkDigitCount,
-            startChunk: Math.max(0, startChunk - (workerIndex > 0 ? 1 : 0)),
-            endChunk: Math.min(chunkCount, endChunk + (workerIndex + 1 < workerCount ? 1 : 0)),
-            minOffset: startChunk * unitsPerChunk,
-            maxOffset: Math.min(endChunk * unitsPerChunk, totalUnits)
+            startChunk: Math.max(0, start - leadChunks),
+            endChunk: Math.min(chunkCount, end + 1),          // +1: a match can straddle the block's end
+            minOffset: start * chunkDigitCount,
+            maxOffset: Math.min(end * chunkDigitCount, digitCount)
           });
-        } catch (error) {
-          resolve({ error });
-        }
-      }));
-    }
+        } catch (error) { finish(reject, error); }
+      };
 
-    if (S.anyMatch) {
-      return await new Promise((resolve, reject) => {
-        let remaining = jobs.length;
-        for (const job of jobs) job.then(result => {
-          if (result.error) reject(result.error);
-          else if (result.cancelled) reject(new DOMException("Search cancelled.", "AbortError"));
-          else if (result.offset >= 0) resolve(result.offset);
-          else if (--remaining === 0) resolve(-1);
-        });
-      });
-    }
-    for (const job of jobs) {
-      const result = await job;
-      if (result.error) throw result.error;
-      if (result.cancelled) throw new DOMException("Search cancelled.", "AbortError");
-      const offset = result.offset;
-      if (offset >= 0) return offset;
-    }
-    return -1;
+      for (let workerIndex = 0; workerIndex < workerCount; workerIndex++) {
+        const worker = new Worker(workerUrl);
+        workers.push(worker);
+        worker.block = -1;
+        worker.onmessage = event => {
+          const message = event.data;
+          if (settled) return;
+          if (message.type === "progress") {
+            const first = worker.block * blockSize;
+            const index = message.chunkIndex;
+            if (index >= first && index < first + blockSize && !chunkDone[index]) {
+              chunkDone[index] = 1;
+              doneChunks++;
+              report();
+            }
+          } else if (message.type === "done") {
+            blockDone[worker.block] = 1;
+            if (message.offset >= 0) {
+              blockOffset[worker.block] = message.offset;
+              if (S.anyMatch) { finish(resolve, message.offset); return; }
+              bestBlock = Math.min(bestBlock, worker.block);
+            }
+            check();
+            assign(worker);
+          } else if (message.type === "error") {
+            finish(reject, new Error(message.message));
+          }
+        };
+        worker.onerror = event => finish(reject, new Error(event.message || "The parallel search worker failed."));
+        assign(worker);
+      }
+    });
   } finally {
     signal.removeEventListener("abort", cancelWorkers);
     workers.forEach(worker => worker.terminate());
@@ -509,7 +604,7 @@ async function search(kind, value) {
   }
   searchInProgress = true;
   try {
-    if (!await confirmLargeSearch()) {
+    if (!await confirmLargeSearch(kind, query)) {
       showResult(resultId, "Search cancelled.");
       byId("loadStatus").textContent = "Search cancelled.";
       return;
@@ -625,7 +720,6 @@ byId("searchImage").addEventListener("click", async () => {
   searchInProgress = true;
   let image;
   try {
-    if (!await confirmLargeSearch()) { showResult("imageResult", "Search cancelled."); return; }
     const width = clamp(byId("searchWidth").value, 2, 12);
     const height = clamp(byId("searchHeight").value, 2, 12);
     image = await createImageBitmap(imageFile);
@@ -641,6 +735,7 @@ byId("searchImage").addEventListener("click", async () => {
       const r = pixels[i * 4], g = pixels[i * 4 + 1], b = pixels[i * 4 + 2];
       pattern += bwMode ? ((0.299 * r + 0.587 * g + 0.114 * b) >= 128 ? "w" : "b") : nearestDigit(r, g, b);
     }
+    if (!await confirmLargeSearch(bwMode ? "pattern" : "digit", pattern, bwMode ? bwExtra() : {})) { showResult("imageResult", "Search cancelled."); return; }
     const offset = bwMode ? await findMatch("pattern", pattern, bwExtra()) : await findMatch("digit", pattern);
     showResult("imageResult", offset < 0 ? "That color pattern was not found in the available pi digits." : `Nearest color pattern found at digit ${format(offset)}.`);
     if (offset >= 0) {
@@ -980,7 +1075,7 @@ async function searchShape() {
   if (searchInProgress) { hint.textContent = "A search is already running."; return; }
   searchInProgress = true;
   try {
-    if (!await confirmLargeSearch()) { hint.textContent = "Search cancelled."; return; }
+    if (!await confirmLargeSearch(bw || query.includes(".") ? "pattern" : "digit", query, bw ? bwExtra() : {})) { hint.textContent = "Search cancelled."; return; }
     hint.textContent = "Searching…";
     const offset = bw || query.includes(".") ? await findMatch("pattern", query, bw ? bwExtra() : {}) : await findMatch("digit", query);
     if (offset < 0) { hint.textContent = "That shape was not found in the available digits."; return; }
